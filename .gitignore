@@ -30,3 +30,10 @@
 *.exe
 *.out
 *.app
+.vs/ProjectSettings.json
+.vs/slnx.sqlite
+.vs/CSE-CG-Raytracer/v16/Browse.VC.db
+.vs/CSE-CG-Raytracer/v16/Browse.VC.db-shm
+.vs/CSE-CG-Raytracer/v16/Browse.VC.db-wal
+.vs/CSE-CG-Raytracer/v16/Browse.VC.opendb
+out/build/
