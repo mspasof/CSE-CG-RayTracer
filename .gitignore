@@ -33,3 +33,5 @@
 # Editors
 .vscode
 .vs
+build
+out/build/
