@@ -1,6 +1,3 @@
-# Blender MTL File: 'None'
-# Material Count: 1
-
-newmtl None
-Kd 0.8 0.8 0.8
-Ks 0.0 0.0 0.0
+version https://git-lfs.github.com/spec/v1
+oid sha256:79f5b00da5f28f0a2c1f84d096c884824bfaab118abb0a39b68d098542ab1acd
+size 90
