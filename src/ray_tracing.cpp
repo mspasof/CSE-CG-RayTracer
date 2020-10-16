@@ -30,9 +30,8 @@ bool intersectRayWithPlane(const Plane& plane, Ray& ray)
 
     float t = (plane.D - glm::dot(ray.origin, glm::normalize(plane.normal))) / glm::dot(ray.direction, glm::normalize(plane.normal));
 
-    if (t > 0) {
-        if (t < ray.t)
-            ray.t = t;
+    if (t > 0 && t < ray.t) {
+        ray.t = t;
         return true;
     }
     else
@@ -86,8 +85,10 @@ bool intersectRayWithShape(const Sphere& sphere, Ray& ray, HitInfo& hitInfo)
 
     if (D == 0) {
         float t = -b / (2 * a);
-        ray.t = t;
-        return true;
+        if(t < ray.t) {
+            ray.t = t;
+            return true;
+        }
     }
 
     if (D > 0) {
@@ -95,9 +96,12 @@ bool intersectRayWithShape(const Sphere& sphere, Ray& ray, HitInfo& hitInfo)
         float t2 = (-b - sqrt(D)) / (2 * a);
 
         float t = glm::min(t1, t2);
-        ray.t = t;
-        return true;
+        if(t < ray.t) {
+            ray.t = t;
+            return true;
+        }
     }
+    return false;
 }
 
 /// Input: an axis-aligned bounding box with the following parameters: minimum coordinates box.lower and maximum coordinates box.upper
@@ -125,7 +129,11 @@ bool intersectRayWithShape(const AxisAlignedBox& box, Ray& ray)
 
     if (tin > tout || tout < 0)
         return false;
-    else
-        ray.t = tin;
-    return true;
+    else {
+        if(tin < ray.t) {
+            ray.t = tin;
+            return true;
+        }
+    }
+    return false;
 }
