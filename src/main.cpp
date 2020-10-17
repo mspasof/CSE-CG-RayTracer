@@ -29,20 +29,58 @@ DISABLE_WARNINGS_POP()
 constexpr glm::ivec2 windowResolution { 800, 800 };
 const std::filesystem::path dataPath { DATA_DIR };
 const std::filesystem::path outputPath { OUTPUT_DIR };
+const float EPSILON = 0.00001f;
 
 enum class ViewMode {
     Rasterization = 0,
     RayTracing = 1
 };
-
+bool isVisibleByPointLight(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo& hitInfo, PointLight pointLight){
+    Ray rayToPointLightSource;
+    rayToPointLightSource.origin = ray.origin + ray.t*ray.direction;
+    rayToPointLightSource.direction = -rayToPointLightSource.origin + pointLight.position;
+    rayToPointLightSource.origin = rayToPointLightSource.origin + EPSILON * rayToPointLightSource.direction;
+    rayToPointLightSource.t = 1;
+    bool intersect = false;
+    // You can uncomment to next line to draw a ray to each pointLight source regardless of intersections with other objects.
+    // drawRay(rayToPointLightSource, glm::vec3(1));
+    for (const auto& mesh : scene.meshes) {
+        for (const auto& tri : mesh.triangles) {
+            const auto v0 = mesh.vertices[tri[0]];
+            const auto v1 = mesh.vertices[tri[1]];
+            const auto v2 = mesh.vertices[tri[2]];
+                    
+            if (intersectRayWithTriangle(v0.p, v1.p, v2.p, rayToPointLightSource, hitInfo)) {
+                // This can be used later if we work with transparent objects.
+                hitInfo.material = mesh.material;
+                intersect = true;
+            }
+        }
+    }
+    for(const auto& sphere : scene.spheres) {
+        if(intersectRayWithShape(sphere, rayToPointLightSource, hitInfo)) {
+            // This can be used later if we work with transparent objects.
+            hitInfo.material = sphere.material;
+            intersect = true;
+        }   
+    }
+    // Drawing a red visual debug ray if it intersects any object apart from the pointLight.
+    if(intersect == true) drawRay(rayToPointLightSource, glm::vec3(1.0f, 0.0f, 0.0f));
+    else drawRay(rayToPointLightSource, glm::vec3(1.0f));
+    return intersect;
+}
 
 // NOTE(Mathijs): separate function to make recursion easier (could also be done with lambda + std::function).
 static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray)
 {
     HitInfo hitInfo;
+    
     if (bvh.intersect(ray, hitInfo)) {
         // Draw a white debug ray.
         drawRay(ray, glm::vec3(1.0f));
+        for(const auto& pointLight : scene.pointLights) {
+            (void)isVisibleByPointLight(scene, bvh, ray, hitInfo, pointLight);
+        }
         // Set the color of the pixel to white if the ray hits.
         return glm::vec3(1.0f);
     } else {
@@ -52,7 +90,6 @@ static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy
         return glm::vec3(0.0f);
     }
 }
-
 static void setOpenGLMatrices(const Trackball& camera);
 static void renderOpenGL(const Scene& scene, const Trackball& camera, int selectedLight);
 
