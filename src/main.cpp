@@ -35,11 +35,10 @@ enum class ViewMode {
     Rasterization = 0,
     RayTracing = 1
 };
-<<<<<<< HEAD
 
 static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
 static glm::vec3 getSpecularLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
-=======
+
 bool isVisibleByPointLight(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo& hitInfo, PointLight pointLight){
     Ray rayToPointLightSource;
     rayToPointLightSource.origin = ray.origin + ray.t*ray.direction;
@@ -74,7 +73,6 @@ bool isVisibleByPointLight(const Scene& scene, const BoundingVolumeHierarchy& bv
     else drawRay(rayToPointLightSource, glm::vec3(1.0f));
     return intersect;
 }
->>>>>>> main
 
 // NOTE(Mathijs): separate function to make recursion easier (could also be done with lambda + std::function).
 static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray)
