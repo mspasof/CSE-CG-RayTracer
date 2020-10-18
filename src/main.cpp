@@ -54,6 +54,15 @@ glm::vec3 Reflect(glm::vec3 vec, glm::vec3 norm){
     return 2*std::max(0.0f, glm::dot(glm::normalize(vec), norm))*norm - vec;
 }
 
+void clampLight(glm::vec3& light){
+    if (light.x > 1.0f)
+        light.x = 1.0f;
+    if (light.y > 1.0f)
+        light.y = 1.0f;
+    if (light.z > 1.0f)
+        light.z = 1.0f;
+}
+
 bool isVisibleByPointLight(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo& hitInfo, PointLight pointLight){
     Ray rayToPointLightSource;
     rayToPointLightSource.origin = ray.origin + ray.t*ray.direction;
@@ -125,7 +134,9 @@ static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy
         }
 
         // Set the color of the pixel to white if the ray hits.
-        return color + getDiffuseLighting(scene, ray, hitInfo);
+        color += getDiffuseLighting(scene, ray, hitInfo);
+        clampLight(color);
+        return color;
     } else {
         // Draw a red debug ray if the ray missed.
         drawRay(ray, glm::vec3(1.0f, 0.0f, 0.0f));
@@ -464,12 +475,7 @@ static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo
         totalVector += individualVector;
     }
 
-    if (totalVector.x > 1.0f)
-        totalVector.x = 1.0f;
-    if (totalVector.y > 1.0f)
-        totalVector.y = 1.0f;
-    if (totalVector.z > 1.0f)
-        totalVector.z = 1.0f;
+    clampLight(totalVector);
 
     return totalVector;
 }
