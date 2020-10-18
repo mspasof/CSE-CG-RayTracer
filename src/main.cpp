@@ -36,6 +36,7 @@ enum class ViewMode {
 };
 
 static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
+static glm::vec3 getSpecularLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
 
 // NOTE(Mathijs): separate function to make recursion easier (could also be done with lambda + std::function).
 static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray)
@@ -45,7 +46,7 @@ static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy
         // Draw a white debug ray.
         drawRay(ray, glm::vec3(1.0f));
         // Set the color of the pixel to white if the ray hits.
-        return getDiffuseLighting(scene, ray, hitInfo);
+        return getDiffuseLighting(scene, ray, hitInfo) + getSpecularLighting(scene, ray, hitInfo);
     } else {
         // Draw a red debug ray if the ray missed.
         drawRay(ray, glm::vec3(1.0f, 0.0f, 0.0f));
@@ -365,6 +366,42 @@ static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo
 
         coefficient = coefficient / distance2;
         glm::vec3 individualVector = Kd * lightcolor * coefficient;
+
+        totalVector += individualVector;
+    }
+
+    if (totalVector.x > 1.0f)
+        totalVector.x = 1.0f;
+    if (totalVector.y > 1.0f)
+        totalVector.y = 1.0f;
+    if (totalVector.z > 1.0f)
+        totalVector.z = 1.0f;
+
+    return totalVector;
+}
+
+static glm::vec3 getSpecularLighting(const Scene& scene, Ray ray, HitInfo hitInfo) {
+    const glm::vec3 Ks = hitInfo.material.ks;
+    const float s = hitInfo.material.shininess;
+    const glm::vec3 normal = hitInfo.normal;
+    const glm::vec3 pointPos = ray.origin + ray.t * ray.direction;
+
+    glm::vec3 totalVector = glm::vec3(0.0f);
+
+    for (PointLight light : scene.pointLights) {
+        glm::vec3 lightPos = light.position;
+        glm::vec3 lightToPoint = pointPos - lightPos;
+        glm::vec3 reflection = glm::normalize(glm::reflect(glm::normalize(lightToPoint), glm::normalize(normal)));
+        glm::vec3 view = ray.origin - pointPos;
+
+        float coefficient = glm::pow((glm::dot(glm::normalize(reflection), glm::normalize(view))), s);
+
+        if (coefficient < 0.0f)
+            coefficient = 0.0f;
+
+        glm::vec3 lightcolor = light.color;
+
+        glm::vec3 individualVector = Ks * lightcolor * coefficient;
 
         totalVector += individualVector;
     }
