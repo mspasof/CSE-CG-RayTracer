@@ -35,6 +35,7 @@ enum class ViewMode {
     Rasterization = 0,
     RayTracing = 1
 };
+
 bool isVisibleByPointLight(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo& hitInfo, PointLight pointLight){
     Ray rayToPointLightSource;
     rayToPointLightSource.origin = ray.origin + ray.t*ray.direction;
@@ -70,6 +71,10 @@ bool isVisibleByPointLight(const Scene& scene, const BoundingVolumeHierarchy& bv
     return intersect;
 }
 
+
+static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
+
+
 // NOTE(Mathijs): separate function to make recursion easier (could also be done with lambda + std::function).
 static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray)
 {
@@ -82,7 +87,7 @@ static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy
             (void)isVisibleByPointLight(scene, bvh, ray, hitInfo, pointLight);
         }
         // Set the color of the pixel to white if the ray hits.
-        return glm::vec3(1.0f);
+        return getDiffuseLighting(scene, ray, hitInfo);
     } else {
         // Draw a red debug ray if the ray missed.
         drawRay(ray, glm::vec3(1.0f, 0.0f, 0.0f));
@@ -378,4 +383,39 @@ static void renderOpenGL(const Scene& scene, const Trackball& camera, int select
     // Draw a colored sphere at the location at which the trackball is looking/rotating around.
     glDisable(GL_LIGHTING);
     drawSphere(camera.lookAt(), 0.01f, glm::vec3(0.2f, 0.2f, 1.0f));
+}
+
+static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo) {
+    const glm::vec3 Kd = hitInfo.material.kd;
+    const glm::vec3 normal = hitInfo.normal;
+    const glm::vec3 pointPos = ray.origin + ray.t * ray.direction;
+
+    glm::vec3 totalVector = glm::vec3(0.0f);
+
+    for (PointLight light : scene.pointLights) {
+        glm::vec3 lightPos = light.position;
+        glm::vec3 pointToLight = lightPos - pointPos;
+
+        float coefficient = glm::dot(glm::normalize(normal), glm::normalize(pointToLight));
+
+        if (coefficient < 0.0f)
+            coefficient = 0.0f;
+
+        float distance2 = glm::dot(pointToLight, pointToLight);
+        glm::vec3 lightcolor = light.color;
+
+        coefficient = coefficient / distance2;
+        glm::vec3 individualVector = Kd * lightcolor * coefficient;
+
+        totalVector += individualVector;
+    }
+
+    if (totalVector.x > 1.0f)
+        totalVector.x = 1.0f;
+    if (totalVector.y > 1.0f)
+        totalVector.y = 1.0f;
+    if (totalVector.z > 1.0f)
+        totalVector.z = 1.0f;
+
+    return totalVector;
 }
