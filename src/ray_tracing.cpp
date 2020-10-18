@@ -53,7 +53,7 @@ Plane trianglePlane(const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v
 /// Input: the three vertices of the triangle
 /// Output: if intersects then modify the hit parameter ray.t and return true, otherwise return false
 bool intersectRayWithTriangle(const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2, Ray& ray, HitInfo& hitInfo)
-{
+{   
     Plane plane = trianglePlane(v0, v1, v2);
     float originalT = ray.t;
     bool hitPlane = intersectRayWithPlane(plane, ray);
@@ -65,7 +65,11 @@ bool intersectRayWithTriangle(const glm::vec3& v0, const glm::vec3& v1, const gl
         else {
             hitInfo.normal = plane.normal;
             return true;
+<<<<<<< HEAD
         }  
+=======
+        }
+>>>>>>> main
     }
     return false;
 }
@@ -87,8 +91,10 @@ bool intersectRayWithShape(const Sphere& sphere, Ray& ray, HitInfo& hitInfo)
 
     if (D == 0) {
         float t = -b / (2 * a);
-        if(t < ray.t) {
+        if(t < ray.t && t > 0) {
             ray.t = t;
+            hitInfo.material = sphere.material;
+            hitInfo.normal = -sphere.center + (ray.origin + ray.t * ray.direction);
             return true;
         }
     }
@@ -96,10 +102,13 @@ bool intersectRayWithShape(const Sphere& sphere, Ray& ray, HitInfo& hitInfo)
     if (D > 0) {
         float t1 = (-b + sqrt(D)) / (2 * a);
         float t2 = (-b - sqrt(D)) / (2 * a);
-
-        float t = glm::min(t1, t2);
-        if(t < ray.t) {
+        float t;
+        if(t1 > 0 && t2 > 0) t = glm::min(t1, t2);
+        else t = glm::max(t1, t2);
+        if(t < ray.t && t > 0) {
             ray.t = t;
+            hitInfo.material = sphere.material;
+            hitInfo.normal = -sphere.center + (ray.origin + ray.t * ray.direction);
             return true;
         }
     }
@@ -132,7 +141,7 @@ bool intersectRayWithShape(const AxisAlignedBox& box, Ray& ray)
     if (tin > tout || tout < 0)
         return false;
     else {
-        if(tin < ray.t) {
+        if(tin < ray.t && tin > 0) {
             ray.t = tin;
             return true;
         }
