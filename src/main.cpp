@@ -67,7 +67,80 @@ bool isVisibleByPointLight(const Scene& scene, const BoundingVolumeHierarchy& bv
     // Drawing a red visual debug ray if it intersects any object apart from the pointLight.
     if(intersect == true) drawRay(rayToPointLightSource, glm::vec3(1.0f, 0.0f, 0.0f));
     else drawRay(rayToPointLightSource, glm::vec3(1.0f));
-    return intersect;
+    return !intersect;
+}
+
+float percentageIllumination(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo, SphericalLight sphericalLight) {
+    // Actual number of samples is 2*samples + 1 per axis
+    const int samples = 4;
+    int numVisibleLightPoints = 0;
+    for(int i = -samples; i <= samples; i++) {
+        Ray rayInLight = Ray();
+        Sphere sphere = Sphere();
+        sphere.center = sphericalLight.position;
+        sphere.radius = sphericalLight.radius;
+        if(i == 0) {
+            PointLight lightCenter = PointLight();
+            // Shift = 0
+            rayInLight.origin = sphericalLight.position;
+            rayInLight.direction = -rayInLight.origin + ray.origin + ray.t * ray.direction;
+            intersectRayWithShape(sphere, rayInLight, hitInfo);
+            lightCenter.position = rayInLight.origin + rayInLight.t * rayInLight.direction;
+            lightCenter.color = sphericalLight.color;
+            if(isVisibleByPointLight(scene, bvh, ray, hitInfo, lightCenter)) numVisibleLightPoints++;
+        }
+        else {
+            float shift = (((float)i/samples) * sphericalLight.radius);
+
+            PointLight lightXshift = PointLight();
+            rayInLight.origin = sphericalLight.position + glm::vec3(shift, 0, 0);
+            rayInLight.direction = -rayInLight.origin + ray.origin + ray.t * ray.direction;
+            rayInLight.t = 1;
+            intersectRayWithShape(sphere, rayInLight, hitInfo); 
+            lightXshift.position = rayInLight.origin + rayInLight.t * rayInLight.direction;
+            lightXshift.color = sphericalLight.color;
+            if(isVisibleByPointLight(scene, bvh, ray, hitInfo, lightXshift)) numVisibleLightPoints++;
+
+            PointLight lightYshift = PointLight();
+            rayInLight.origin = sphericalLight.position + glm::vec3(0, shift, 0);
+            rayInLight.direction = -rayInLight.origin + ray.origin + ray.t * ray.direction;
+            intersectRayWithShape(sphere, rayInLight, hitInfo); 
+            lightYshift.position = rayInLight.origin + rayInLight.t * rayInLight.direction; 
+            lightYshift.color = sphericalLight.color;
+            if(isVisibleByPointLight(scene, bvh, ray, hitInfo, lightYshift)) numVisibleLightPoints++;
+
+            PointLight lightZshift = PointLight();
+            rayInLight.origin = sphericalLight.position + glm::vec3(0, 0, shift);
+            rayInLight.direction = -rayInLight.origin + ray.origin + ray.t * ray.direction;
+            intersectRayWithShape(sphere, rayInLight, hitInfo); 
+            lightZshift.position = rayInLight.origin + rayInLight.t * rayInLight.direction; 
+            lightZshift.position = rayInLight.origin + rayInLight.t * rayInLight.direction;
+            lightZshift.color = sphericalLight.color;
+            if(isVisibleByPointLight(scene, bvh, ray, hitInfo, lightZshift)) numVisibleLightPoints++;
+        }
+        //  else {
+        //     float shift = (((float)i/samples) * sphericalLight.radius);
+
+        //     PointLight lightXshift = PointLight();
+        //     intersectRayWithShape(sphere, rayInLight, hitInfo); 
+        //     lightXshift.position = sphericalLight.position + glm::vec3(shift, 0, 0);
+        //     lightXshift.color = sphericalLight.color;
+        //     if(isVisibleByPointLight(scene, bvh, ray, hitInfo, lightXshift)) numVisibleLightPoints++;
+
+        //     PointLight lightYshift = PointLight();
+        //     lightYshift.position = phericalLight.position + glm::vec3(0, shift, 0);
+        //     lightYshift.color = sphericalLight.color;
+        //     if(isVisibleByPointLight(scene, bvh, ray, hitInfo, lightYshift)) numVisibleLightPoints++;
+
+        //     PointLight lightZshift = PointLight();
+        //     lightZshift.position = sphericalLight.position + glm::vec3(0, 0 ,shift);
+        //     lightZshift.position = rayInLight.origin + rayInLight.t * rayInLight.direction;
+        //     lightZshift.color = sphericalLight.color;
+        //     if(isVisibleByPointLight(scene, bvh, ray, hitInfo, lightZshift)) numVisibleLightPoints++;
+        // }
+    }
+            float percentageIllumination = numVisibleLightPoints/ (2*3*samples + 1.0f);
+            return percentageIllumination;
 }
 
 // NOTE(Mathijs): separate function to make recursion easier (could also be done with lambda + std::function).
@@ -78,9 +151,16 @@ static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy
     if (bvh.intersect(ray, hitInfo)) {
         // Draw a white debug ray.
         drawRay(ray, glm::vec3(1.0f));
+        //std::cout<<glm::vec3(1,2,3) + 2.0f;
         for(const auto& pointLight : scene.pointLights) {
             (void)isVisibleByPointLight(scene, bvh, ray, hitInfo, pointLight);
         }
+        float overallIllumination = 0.0f;
+        for(const auto& sphericalLight : scene.sphericalLight) {    
+            overallIllumination+=percentageIllumination(scene, bvh, ray, hitInfo, sphericalLight);
+        }
+        overallIllumination = overallIllumination / scene.sphericalLight.size();
+        std::cout<<overallIllumination<<std::endl;
         // Set the color of the pixel to white if the ray hits.
         return glm::vec3(1.0f);
     } else {
