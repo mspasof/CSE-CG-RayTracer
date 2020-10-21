@@ -140,7 +140,7 @@ static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy
 
         // Set the color of the pixel to white if the ray hits.
 
-        color += getDiffuseLighting(scene, ray, hitInfo) + getSpecularLighting(scene, ray, hitInfo);;
+        color += getDiffuseLighting(scene, ray, hitInfo) + getSpecularLighting(scene, ray, hitInfo);
         clampLight(color);
         return color;
     } else {
