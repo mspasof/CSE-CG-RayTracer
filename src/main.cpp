@@ -31,13 +31,42 @@ const std::filesystem::path dataPath { DATA_DIR };
 const std::filesystem::path outputPath { OUTPUT_DIR };
 const float EPSILON = 0.00001f;
 
+// Config
+const int reflectionDepthLimit = 8;
+int maxReflectionDepth = reflectionDepthLimit;
+bool debugHardShadows = false;
+bool debugNormals = false;
+bool debugReflections = false;
+
 enum class ViewMode {
     Rasterization = 0,
     RayTracing = 1
 };
 
+
 static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
 static glm::vec3 getSpecularLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
+
+/**
+ * @brief Takes a vector and reflects it across the given normal.
+ * 
+ * @param vec vector to reflect
+ * @param norm normal
+ * @return glm::vec3 reflected ray direction
+ */
+glm::vec3 Reflect(glm::vec3 vec, glm::vec3 norm){
+    return 2*std::max(0.0f, glm::dot(glm::normalize(vec), norm))*norm - vec;
+}
+
+void clampLight(glm::vec3& light){
+    if (light.x > 1.0f)
+        light.x = 1.0f;
+    if (light.y > 1.0f)
+        light.y = 1.0f;
+    if (light.z > 1.0f)
+        light.z = 1.0f;
+}
+
 
 bool isVisibleByPointLight(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo& hitInfo, PointLight pointLight){
     Ray rayToPointLightSource;
@@ -68,25 +97,52 @@ bool isVisibleByPointLight(const Scene& scene, const BoundingVolumeHierarchy& bv
             intersect = true;
         }   
     }
+
     // Drawing a red visual debug ray if it intersects any object apart from the pointLight.
-    if(intersect == true) drawRay(rayToPointLightSource, glm::vec3(1.0f, 0.0f, 0.0f));
-    else drawRay(rayToPointLightSource, glm::vec3(1.0f));
+    if(debugHardShadows){
+        if(intersect == true) drawRay(rayToPointLightSource, glm::vec3(1.0f, 0.0f, 0.0f));
+        else drawRay(rayToPointLightSource, glm::vec3(1.0f));
+    }
     return intersect;
 }
 
+
+static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
+static glm::vec3 getReflectedLight(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo, int depth);
+
 // NOTE(Mathijs): separate function to make recursion easier (could also be done with lambda + std::function).
-static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray)
+static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, int depth)
 {
     HitInfo hitInfo;
     
     if (bvh.intersect(ray, hitInfo)) {
+
+        glm::vec3 color(0.0f);
         // Draw a white debug ray.
-        drawRay(ray, glm::vec3(1.0f));
+        if(depth == 0 || debugReflections)
+            drawRay(ray, glm::vec3(1.0f));
+        
         for(const auto& pointLight : scene.pointLights) {
             (void)isVisibleByPointLight(scene, bvh, ray, hitInfo, pointLight);
         }
+
+        if(depth<=maxReflectionDepth && hitInfo.material.ks!=glm::vec3(0.0f)){
+            color += hitInfo.material.ks * getReflectedLight(scene, bvh, ray, hitInfo, depth);
+        }
+
+        if(debugNormals){
+            Ray normal;
+            normal.t = 1;
+            normal.origin = ray.origin + ray.direction * ray.t;
+            normal.direction = hitInfo.normal;
+            drawRay(normal, glm::vec3{0.0f, 0.0f, 1.0f});
+        }
+
         // Set the color of the pixel to white if the ray hits.
-        return getDiffuseLighting(scene, ray, hitInfo) + getSpecularLighting(scene, ray, hitInfo);
+
+        color += getDiffuseLighting(scene, ray, hitInfo) + getSpecularLighting(scene, ray, hitInfo);;
+        clampLight(color);
+        return color;
     } else {
         // Draw a red debug ray if the ray missed.
         drawRay(ray, glm::vec3(1.0f, 0.0f, 0.0f));
@@ -111,7 +167,7 @@ static void renderRayTracing(const Scene& scene, const Trackball& camera, const 
                 float(y) / windowResolution.y * 2.0f - 1.0f
             };
             const Ray cameraRay = camera.generateRay(normalizedPixelPos);
-            screen.setPixel(x, y, getFinalColor(scene, bvh, cameraRay));
+            screen.setPixel(x, y, getFinalColor(scene, bvh, cameraRay, 0));
         }
     }
 }
@@ -184,6 +240,22 @@ int main(int argc, char** argv)
             }
             screen.writeBitmapToFile(outputPath / "render.bmp");
         }
+        ImGui::Spacing();
+        ImGui::Separator();
+
+        // Add your visual debug switches in this section
+        ImGui::Text("Visual Debuging");
+        ImGui::Checkbox("Draw Direct Light", &debugHardShadows);
+        ImGui::Checkbox("Draw Normals", &debugNormals);
+        ImGui::Checkbox("Draw Reflections", &debugReflections);
+        
+        ImGui::Spacing();
+        ImGui::Separator();
+        
+        // If you have a variable you want to test, feel free to add a new GUI item to this section
+        ImGui::Text("Custom Debug Variables");
+        ImGui::SliderInt("Max Reflection Depth", &maxReflectionDepth, 0, reflectionDepthLimit);
+
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Text("Debugging");
@@ -262,7 +334,7 @@ int main(int argc, char** argv)
                 // Call getFinalColor for the debug ray. Ignore the result but tell the function that it should
                 // draw the rays instead.
                 enableDrawRay = true;
-                (void)getFinalColor(scene, bvh, *optDebugRay);
+                (void)getFinalColor(scene, bvh, *optDebugRay, 0);
                 enableDrawRay = false;
             }
             glPopAttrib();
@@ -409,6 +481,7 @@ static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo
         totalVector += individualVector;
     }
 
+
     const int N = 20; // number of points that will be distributed on the sphere
     for (SphericalLight sph_light : scene.sphericalLight) {
         std::vector<PointLight> placedPointLights;
@@ -459,8 +532,11 @@ static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo
     if (totalVector.z > 1.0f)
         totalVector.z = 1.0f;
 
+    clampLight(totalVector);
+
     return totalVector;
 }
+
 
 static glm::vec3 getSpecularLighting(const Scene& scene, Ray ray, HitInfo hitInfo) {
     const glm::vec3 Ks = hitInfo.material.ks;
@@ -496,4 +572,13 @@ static glm::vec3 getSpecularLighting(const Scene& scene, Ray ray, HitInfo hitInf
         totalVector.z = 1.0f;
 
     return totalVector;
+}
+
+static glm::vec3 getReflectedLight(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo, int depth){
+    Ray reflection;
+    reflection.t = std::numeric_limits<float>::max();
+    reflection.origin = ray.origin + ray.direction * (ray.t - EPSILON);
+    reflection.direction = Reflect(-ray.direction, hitInfo.normal);
+    return getFinalColor(scene, bvh, reflection, depth + 1);
+
 }

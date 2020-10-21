@@ -25,10 +25,11 @@ bool pointInTriangle(const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& 
 
 bool intersectRayWithPlane(const Plane& plane, Ray& ray)
 {
-    if (glm::dot(ray.direction, glm::normalize(plane.normal)) == 0)
+    float angle = glm::dot(glm::normalize(ray.direction), plane.normal);
+    if (angle == 0)
         return false;
 
-    float t = (plane.D - glm::dot(ray.origin, glm::normalize(plane.normal))) / glm::dot(ray.direction, glm::normalize(plane.normal));
+    float t = (plane.D - glm::dot(ray.origin, plane.normal)) / angle;
 
     if (t > 0 && t < ray.t) {
         ray.t = t;
@@ -68,7 +69,7 @@ bool intersectRayWithTriangle(const glm::vec3& v0, const glm::vec3& v1, const gl
             else
                 hitInfo.normal = -plane.normal;
             return true;
-        }
+        }  
     }
     return false;
 }
