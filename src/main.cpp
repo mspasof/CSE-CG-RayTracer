@@ -43,6 +43,10 @@ enum class ViewMode {
     RayTracing = 1
 };
 
+
+static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
+static glm::vec3 getSpecularLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
+
 /**
  * @brief Takes a vector and reflects it across the given normal.
  * 
@@ -62,6 +66,7 @@ void clampLight(glm::vec3& light){
     if (light.z > 1.0f)
         light.z = 1.0f;
 }
+
 
 bool isVisibleByPointLight(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo& hitInfo, PointLight pointLight){
     Ray rayToPointLightSource;
@@ -134,7 +139,8 @@ static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy
         }
 
         // Set the color of the pixel to white if the ray hits.
-        color += getDiffuseLighting(scene, ray, hitInfo);
+
+        color += getDiffuseLighting(scene, ray, hitInfo) + getSpecularLighting(scene, ray, hitInfo);
         clampLight(color);
         return color;
     } else {
@@ -452,7 +458,11 @@ static void renderOpenGL(const Scene& scene, const Trackball& camera, int select
 
 static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo) {
     const glm::vec3 Kd = hitInfo.material.kd;
-    const glm::vec3 normal = hitInfo.normal;
+
+    glm::vec3 normal = hitInfo.normal;
+    if (glm::dot(glm::normalize(hitInfo.normal), glm::normalize(ray.direction)) > 0)
+        normal = -hitInfo.normal;
+    
     const glm::vec3 pointPos = ray.origin + ray.t * ray.direction;
 
     glm::vec3 totalVector = glm::vec3(0.0f);
@@ -475,7 +485,99 @@ static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo
         totalVector += individualVector;
     }
 
+
+    const int N = 20; // number of points that will be distributed on the sphere
+    for (SphericalLight sph_light : scene.sphericalLight) {
+        std::vector<PointLight> placedPointLights;
+
+        const double phi = (sqrt(5.0) + 1.0) / 2.0; // golden ratio
+        const double g = (2.0 * glm::pi<float>()) * (2.0 - phi);  //golden angle
+
+        for (int i = 1; i <= N; i++) {
+            const double lat = asin(-1.0 + 2.0 * double(i) / (N + 1));
+            const double lon = g * i;
+
+            const double x = cos(lon) * cos(lat);
+            const double y = sin(lon) * cos(lat);
+            const double z = sin(lat);
+
+            PointLight pointlight;
+            pointlight.position = glm::vec3{ x, y, z } * sph_light.radius + sph_light.position;
+            pointlight.color = sph_light.color;
+            placedPointLights.push_back(pointlight);
+
+            // above method for distributing points over a sphere adapted from:
+            // https://bduvenhage.me/geometry/2019/07/31/generating-equidistant-vectors.html
+        }
+
+        for (PointLight light : placedPointLights) {
+            glm::vec3 lightPos = light.position;
+            glm::vec3 pointToLight = lightPos - pointPos;
+
+            float coefficient = glm::dot(glm::normalize(normal), glm::normalize(pointToLight));
+
+            if (coefficient < 0.0f)
+                coefficient = 0.0f;
+
+            float distance2 = glm::dot(pointToLight, pointToLight);
+            glm::vec3 lightcolor = light.color;
+
+            coefficient = coefficient / distance2 / N;
+            glm::vec3 individualVector = Kd * lightcolor * coefficient;
+
+            totalVector += individualVector;
+        }
+    }
+
+    if (totalVector.x > 1.0f)
+        totalVector.x = 1.0f;
+    if (totalVector.y > 1.0f)
+        totalVector.y = 1.0f;
+    if (totalVector.z > 1.0f)
+        totalVector.z = 1.0f;
+
     clampLight(totalVector);
+
+    return totalVector;
+}
+
+
+static glm::vec3 getSpecularLighting(const Scene& scene, Ray ray, HitInfo hitInfo) {
+    const glm::vec3 Ks = hitInfo.material.ks;
+    const float s = hitInfo.material.shininess;
+
+    glm::vec3 normal = hitInfo.normal;
+    if (glm::dot(glm::normalize(hitInfo.normal), glm::normalize(ray.direction)) > 0)
+        normal = -hitInfo.normal;
+
+    const glm::vec3 pointPos = ray.origin + ray.t * ray.direction;
+
+    glm::vec3 totalVector = glm::vec3(0.0f);
+
+    for (PointLight light : scene.pointLights) {
+        glm::vec3 lightPos = light.position;
+        glm::vec3 lightToPoint = pointPos - lightPos;
+        glm::vec3 reflection = glm::normalize(glm::reflect(glm::normalize(lightToPoint), glm::normalize(normal)));
+        glm::vec3 view = ray.origin - pointPos;
+
+        float coefficient = glm::pow((glm::dot(glm::normalize(reflection), glm::normalize(view))), s);
+
+        if (coefficient < 0.0f)
+            coefficient = 0.0f;
+
+        glm::vec3 lightcolor = light.color;
+
+        glm::vec3 individualVector = Ks * lightcolor * coefficient;
+
+        totalVector += individualVector;
+    }
+
+    if (totalVector.x > 1.0f)
+        totalVector.x = 1.0f;
+    if (totalVector.y > 1.0f)
+        totalVector.y = 1.0f;
+    if (totalVector.z > 1.0f)
+        totalVector.z = 1.0f;
 
     return totalVector;
 }
@@ -486,4 +588,5 @@ static glm::vec3 getReflectedLight(const Scene& scene, const BoundingVolumeHiera
     reflection.origin = ray.origin + ray.direction * (ray.t - EPSILON);
     reflection.direction = Reflect(-ray.direction, hitInfo.normal);
     return getFinalColor(scene, bvh, reflection, depth + 1);
+
 }
