@@ -458,7 +458,11 @@ static void renderOpenGL(const Scene& scene, const Trackball& camera, int select
 
 static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo) {
     const glm::vec3 Kd = hitInfo.material.kd;
-    const glm::vec3 normal = hitInfo.normal;
+
+    glm::vec3 normal = hitInfo.normal;
+    if (glm::dot(glm::normalize(hitInfo.normal), glm::normalize(ray.direction)) > 0)
+        normal = -hitInfo.normal;
+    
     const glm::vec3 pointPos = ray.origin + ray.t * ray.direction;
 
     glm::vec3 totalVector = glm::vec3(0.0f);
@@ -541,7 +545,11 @@ static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo
 static glm::vec3 getSpecularLighting(const Scene& scene, Ray ray, HitInfo hitInfo) {
     const glm::vec3 Ks = hitInfo.material.ks;
     const float s = hitInfo.material.shininess;
-    const glm::vec3 normal = hitInfo.normal;
+
+    glm::vec3 normal = hitInfo.normal;
+    if (glm::dot(glm::normalize(hitInfo.normal), glm::normalize(ray.direction)) > 0)
+        normal = -hitInfo.normal;
+
     const glm::vec3 pointPos = ray.origin + ray.t * ray.direction;
 
     glm::vec3 totalVector = glm::vec3(0.0f);
