@@ -409,6 +409,49 @@ static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo
         totalVector += individualVector;
     }
 
+    const int N = 20; // number of points that will be distributed on the sphere
+    for (SphericalLight sph_light : scene.sphericalLight) {
+        std::vector<PointLight> placedPointLights;
+
+        const double phi = (sqrt(5.0) + 1.0) / 2.0; // golden ratio
+        const double g = (2.0 * glm::pi<float>()) * (2.0 - phi);  //golden angle
+
+        for (int i = 1; i <= N; i++) {
+            const double lat = asin(-1.0 + 2.0 * double(i) / (N + 1));
+            const double lon = g * i;
+
+            const double x = cos(lon) * cos(lat);
+            const double y = sin(lon) * cos(lat);
+            const double z = sin(lat);
+
+            PointLight pointlight;
+            pointlight.position = glm::vec3{ x, y, z } * sph_light.radius + sph_light.position;
+            pointlight.color = sph_light.color;
+            placedPointLights.push_back(pointlight);
+
+            // above method for distributing points over a sphere adapted from:
+            // https://bduvenhage.me/geometry/2019/07/31/generating-equidistant-vectors.html
+        }
+
+        for (PointLight light : placedPointLights) {
+            glm::vec3 lightPos = light.position;
+            glm::vec3 pointToLight = lightPos - pointPos;
+
+            float coefficient = glm::dot(glm::normalize(normal), glm::normalize(pointToLight));
+
+            if (coefficient < 0.0f)
+                coefficient = 0.0f;
+
+            float distance2 = glm::dot(pointToLight, pointToLight);
+            glm::vec3 lightcolor = light.color;
+
+            coefficient = coefficient / distance2 / N;
+            glm::vec3 individualVector = Kd * lightcolor * coefficient;
+
+            totalVector += individualVector;
+        }
+    }
+
     if (totalVector.x > 1.0f)
         totalVector.x = 1.0f;
     if (totalVector.y > 1.0f)
