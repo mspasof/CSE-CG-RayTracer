@@ -31,10 +31,43 @@ const std::filesystem::path dataPath { DATA_DIR };
 const std::filesystem::path outputPath { OUTPUT_DIR };
 const float EPSILON = 0.00001f;
 
+// Config
+const int reflectionDepthLimit = 8;
+int maxReflectionDepth = reflectionDepthLimit;
+bool debugHardShadows = false;
+bool debugNormals = false;
+bool debugReflections = false;
+
 enum class ViewMode {
     Rasterization = 0,
     RayTracing = 1
 };
+
+
+static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
+static glm::vec3 getSpecularLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
+
+/**
+ * @brief Takes a vector and reflects it across the given normal.
+ * 
+ * @param vec vector to reflect
+ * @param norm normal
+ * @return glm::vec3 reflected ray direction
+ */
+glm::vec3 Reflect(glm::vec3 vec, glm::vec3 norm){
+    return 2*std::max(0.0f, glm::dot(glm::normalize(vec), norm))*norm - vec;
+}
+
+void clampLight(glm::vec3& light){
+    if (light.x > 1.0f)
+        light.x = 1.0f;
+    if (light.y > 1.0f)
+        light.y = 1.0f;
+    if (light.z > 1.0f)
+        light.z = 1.0f;
+}
+
+
 bool isVisibleByPointLight(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo& hitInfo, PointLight pointLight){
     Ray rayToPointLightSource;
     rayToPointLightSource.origin = ray.origin + ray.t*ray.direction;
@@ -108,15 +141,22 @@ float percentageIllumination(const Scene& scene, const BoundingVolumeHierarchy& 
     return percentageIllumination;
 }
 
+
+static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
+static glm::vec3 getReflectedLight(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo, int depth);
+
 // NOTE(Mathijs): separate function to make recursion easier (could also be done with lambda + std::function).
-static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray)
+static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, int depth)
 {
     HitInfo hitInfo;
     
     if (bvh.intersect(ray, hitInfo)) {
+
+        glm::vec3 color(0.0f);
         // Draw a white debug ray.
-        drawRay(ray, glm::vec3(1.0f));
         bool glob = false;
+        if(depth == 0 || debugReflections)
+            drawRay(ray, glm::vec3(1.0f));
         for(const auto& pointLight : scene.pointLights) {
             glob |= isVisibleByPointLight(scene, bvh, ray, hitInfo, pointLight);
         }
@@ -126,6 +166,23 @@ static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy
         }
         if(!scene.sphericalLight.empty()) overallIlluminationBySphericalLights = overallIlluminationBySphericalLights / scene.sphericalLight.size();
         return glm::vec3(1.0f);
+        if(depth<=maxReflectionDepth && hitInfo.material.ks!=glm::vec3(0.0f)){
+            color += hitInfo.material.ks * getReflectedLight(scene, bvh, ray, hitInfo, depth);
+        }
+
+        if(debugNormals){
+            Ray normal;
+            normal.t = 1;
+            normal.origin = ray.origin + ray.direction * ray.t;
+            normal.direction = hitInfo.normal;
+            drawRay(normal, glm::vec3{0.0f, 0.0f, 1.0f});
+        }
+
+        // Set the color of the pixel to white if the ray hits.
+
+        color += getDiffuseLighting(scene, ray, hitInfo) + getSpecularLighting(scene, ray, hitInfo);
+        clampLight(color);
+        return color;
     } else {
         // Draw a red debug ray if the ray missed.
         drawRay(ray, glm::vec3(1.0f, 0.0f, 0.0f));
@@ -150,7 +207,7 @@ static void renderRayTracing(const Scene& scene, const Trackball& camera, const 
                 float(y) / windowResolution.y * 2.0f - 1.0f
             };
             const Ray cameraRay = camera.generateRay(normalizedPixelPos);
-            screen.setPixel(x, y, getFinalColor(scene, bvh, cameraRay));
+            screen.setPixel(x, y, getFinalColor(scene, bvh, cameraRay, 0));
         }
     }
 }
@@ -223,6 +280,22 @@ int main(int argc, char** argv)
             }
             screen.writeBitmapToFile(outputPath / "render.bmp");
         }
+        ImGui::Spacing();
+        ImGui::Separator();
+
+        // Add your visual debug switches in this section
+        ImGui::Text("Visual Debuging");
+        ImGui::Checkbox("Draw Direct Light", &debugHardShadows);
+        ImGui::Checkbox("Draw Normals", &debugNormals);
+        ImGui::Checkbox("Draw Reflections", &debugReflections);
+        
+        ImGui::Spacing();
+        ImGui::Separator();
+        
+        // If you have a variable you want to test, feel free to add a new GUI item to this section
+        ImGui::Text("Custom Debug Variables");
+        ImGui::SliderInt("Max Reflection Depth", &maxReflectionDepth, 0, reflectionDepthLimit);
+
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Text("Debugging");
@@ -301,7 +374,7 @@ int main(int argc, char** argv)
                 // Call getFinalColor for the debug ray. Ignore the result but tell the function that it should
                 // draw the rays instead.
                 enableDrawRay = true;
-                (void)getFinalColor(scene, bvh, *optDebugRay);
+                (void)getFinalColor(scene, bvh, *optDebugRay, 0);
                 enableDrawRay = false;
             }
             glPopAttrib();
@@ -421,4 +494,139 @@ static void renderOpenGL(const Scene& scene, const Trackball& camera, int select
     // Draw a colored sphere at the location at which the trackball is looking/rotating around.
     glDisable(GL_LIGHTING);
     drawSphere(camera.lookAt(), 0.01f, glm::vec3(0.2f, 0.2f, 1.0f));
+}
+
+static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo) {
+    const glm::vec3 Kd = hitInfo.material.kd;
+
+    glm::vec3 normal = hitInfo.normal;
+    if (glm::dot(glm::normalize(hitInfo.normal), glm::normalize(ray.direction)) > 0)
+        normal = -hitInfo.normal;
+    
+    const glm::vec3 pointPos = ray.origin + ray.t * ray.direction;
+
+    glm::vec3 totalVector = glm::vec3(0.0f);
+
+    for (PointLight light : scene.pointLights) {
+        glm::vec3 lightPos = light.position;
+        glm::vec3 pointToLight = lightPos - pointPos;
+
+        float coefficient = glm::dot(glm::normalize(normal), glm::normalize(pointToLight));
+
+        if (coefficient < 0.0f)
+            coefficient = 0.0f;
+
+        float distance2 = glm::dot(pointToLight, pointToLight);
+        glm::vec3 lightcolor = light.color;
+
+        coefficient = coefficient / distance2;
+        glm::vec3 individualVector = Kd * lightcolor * coefficient;
+
+        totalVector += individualVector;
+    }
+
+
+    const int N = 20; // number of points that will be distributed on the sphere
+    for (SphericalLight sph_light : scene.sphericalLight) {
+        std::vector<PointLight> placedPointLights;
+
+        const double phi = (sqrt(5.0) + 1.0) / 2.0; // golden ratio
+        const double g = (2.0 * glm::pi<float>()) * (2.0 - phi);  //golden angle
+
+        for (int i = 1; i <= N; i++) {
+            const double lat = asin(-1.0 + 2.0 * double(i) / (N + 1));
+            const double lon = g * i;
+
+            const double x = cos(lon) * cos(lat);
+            const double y = sin(lon) * cos(lat);
+            const double z = sin(lat);
+
+            PointLight pointlight;
+            pointlight.position = glm::vec3{ x, y, z } * sph_light.radius + sph_light.position;
+            pointlight.color = sph_light.color;
+            placedPointLights.push_back(pointlight);
+
+            // above method for distributing points over a sphere adapted from:
+            // https://bduvenhage.me/geometry/2019/07/31/generating-equidistant-vectors.html
+        }
+
+        for (PointLight light : placedPointLights) {
+            glm::vec3 lightPos = light.position;
+            glm::vec3 pointToLight = lightPos - pointPos;
+
+            float coefficient = glm::dot(glm::normalize(normal), glm::normalize(pointToLight));
+
+            if (coefficient < 0.0f)
+                coefficient = 0.0f;
+
+            float distance2 = glm::dot(pointToLight, pointToLight);
+            glm::vec3 lightcolor = light.color;
+
+            coefficient = coefficient / distance2 / N;
+            glm::vec3 individualVector = Kd * lightcolor * coefficient;
+
+            totalVector += individualVector;
+        }
+    }
+
+    if (totalVector.x > 1.0f)
+        totalVector.x = 1.0f;
+    if (totalVector.y > 1.0f)
+        totalVector.y = 1.0f;
+    if (totalVector.z > 1.0f)
+        totalVector.z = 1.0f;
+
+    clampLight(totalVector);
+
+    return totalVector;
+}
+
+
+static glm::vec3 getSpecularLighting(const Scene& scene, Ray ray, HitInfo hitInfo) {
+    const glm::vec3 Ks = hitInfo.material.ks;
+    const float s = hitInfo.material.shininess;
+
+    glm::vec3 normal = hitInfo.normal;
+    if (glm::dot(glm::normalize(hitInfo.normal), glm::normalize(ray.direction)) > 0)
+        normal = -hitInfo.normal;
+
+    const glm::vec3 pointPos = ray.origin + ray.t * ray.direction;
+
+    glm::vec3 totalVector = glm::vec3(0.0f);
+
+    for (PointLight light : scene.pointLights) {
+        glm::vec3 lightPos = light.position;
+        glm::vec3 lightToPoint = pointPos - lightPos;
+        glm::vec3 reflection = glm::normalize(glm::reflect(glm::normalize(lightToPoint), glm::normalize(normal)));
+        glm::vec3 view = ray.origin - pointPos;
+
+        float coefficient = glm::pow((glm::dot(glm::normalize(reflection), glm::normalize(view))), s);
+
+        if (coefficient < 0.0f)
+            coefficient = 0.0f;
+
+        glm::vec3 lightcolor = light.color;
+
+        glm::vec3 individualVector = Ks * lightcolor * coefficient;
+
+        totalVector += individualVector;
+    }
+
+    if (totalVector.x > 1.0f)
+        totalVector.x = 1.0f;
+    if (totalVector.y > 1.0f)
+        totalVector.y = 1.0f;
+    if (totalVector.z > 1.0f)
+        totalVector.z = 1.0f;
+
+    return totalVector;
+}
+
+static glm::vec3 getReflectedLight(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo, int depth){
+    Ray reflection;
+    reflection.t = std::numeric_limits<float>::max();
+    reflection.origin = ray.origin + ray.direction * (ray.t - EPSILON);
+    reflection.direction = Reflect(-ray.direction, hitInfo.normal);
+    return getFinalColor(scene, bvh, reflection, depth + 1);
+
 }
