@@ -30,6 +30,12 @@ Scene loadScene(SceneType type, const std::filesystem::path& dataDir)
         std::move(std::begin(subMeshes), std::end(subMeshes), std::back_inserter(scene.meshes));
         scene.sphericalLight.push_back(SphericalLight { glm::vec3(0, 0.45f, 0), 0.1f, glm::vec3(1) }); // Light at the top of the box
     } break;
+    case CornellBoxTransparent: {
+        // Load a 3D model of a Dragon
+        auto subMeshes = loadMesh(dataDir / "CornellBox-Transparent.obj", true);
+        std::move(std::begin(subMeshes), std::end(subMeshes), std::back_inserter(scene.meshes));
+        scene.sphericalLight.push_back(SphericalLight { glm::vec3(0, 0.45f, 0), 0.1f, glm::vec3(1) }); // Light at the top of the box
+    } break;
     case Monkey: {
         // Load a 3D model of a Dragon
         auto subMeshes = loadMesh(dataDir / "monkey-rotated.obj", true);

@@ -37,6 +37,7 @@ int maxReflectionDepth = reflectionDepthLimit;
 bool debugHardShadows = false;
 bool debugNormals = false;
 bool debugReflections = false;
+bool debugTransmissions = false;
 
 enum class ViewMode {
     Rasterization = 0,
@@ -46,17 +47,8 @@ enum class ViewMode {
 
 static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
 static glm::vec3 getSpecularLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
-
-/**
- * @brief Takes a vector and reflects it across the given normal.
- * 
- * @param vec vector to reflect
- * @param norm normal
- * @return glm::vec3 reflected ray direction
- */
-glm::vec3 Reflect(glm::vec3 vec, glm::vec3 norm){
-    return 2*std::max(0.0f, glm::dot(glm::normalize(vec), norm))*norm - vec;
-}
+static glm::vec3 getCombReflRefr(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo, int depth);static glm::vec3 ReflectDir(glm::vec3 vec, glm::vec3 norm);
+static glm::vec3 RefractDir(glm::vec3& vec, glm::vec3& norm, float nextIOR, float currentIOR = 1.0f);
 
 void clampLight(glm::vec3& light){
     if (light.x > 1.0f)
@@ -106,29 +98,25 @@ bool isVisibleByPointLight(const Scene& scene, const BoundingVolumeHierarchy& bv
     return intersect;
 }
 
-
-static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
-static glm::vec3 getReflectedLight(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo, int depth);
-
 // NOTE(Mathijs): separate function to make recursion easier (could also be done with lambda + std::function).
-static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, int depth)
+static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray& refRay, int depth, bool changeRay = false)
 {
     HitInfo hitInfo;
-    
+    Ray ray = refRay;
     if (bvh.intersect(ray, hitInfo)) {
-
+        if(changeRay)
+            refRay.t = ray.t;
         glm::vec3 color(0.0f);
         // Draw a white debug ray.
-        if(depth == 0 || debugReflections)
+        if(depth == 0)
             drawRay(ray, glm::vec3(1.0f));
         
         for(const auto& pointLight : scene.pointLights) {
             (void)isVisibleByPointLight(scene, bvh, ray, hitInfo, pointLight);
         }
 
-        if(depth<=maxReflectionDepth && hitInfo.material.ks!=glm::vec3(0.0f)){
-            color += hitInfo.material.ks * getReflectedLight(scene, bvh, ray, hitInfo, depth);
-        }
+        if(depth<=maxReflectionDepth)
+            color += getCombReflRefr(scene, bvh, ray, hitInfo, depth);
 
         if(debugNormals){
             Ray normal;
@@ -145,7 +133,8 @@ static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy
         return color;
     } else {
         // Draw a red debug ray if the ray missed.
-        drawRay(ray, glm::vec3(1.0f, 0.0f, 0.0f));
+        if(depth==0)
+            drawRay(ray, glm::vec3(1.0f, 0.0f, 0.0f));
         // Set the color of the pixel to black if the ray misses.
         return glm::vec3(0.0f);
     }
@@ -166,7 +155,7 @@ static void renderRayTracing(const Scene& scene, const Trackball& camera, const 
                 float(x) / windowResolution.x * 2.0f - 1.0f,
                 float(y) / windowResolution.y * 2.0f - 1.0f
             };
-            const Ray cameraRay = camera.generateRay(normalizedPixelPos);
+            Ray cameraRay = camera.generateRay(normalizedPixelPos);
             screen.setPixel(x, y, getFinalColor(scene, bvh, cameraRay, 0));
         }
     }
@@ -215,7 +204,7 @@ int main(int argc, char** argv)
         // === Setup the UI ===
         ImGui::Begin("Final Project - Part 2");
         {
-            constexpr std::array items { "SingleTriangle", "Cube", "Cornell Box (with mirror)", "Cornell Box (spherical light and mirror)", "Monkey", "Dragon", /* "AABBs",*/ "Spheres", /*"Mixed",*/ "Custom" };
+            constexpr std::array items { "SingleTriangle", "Cube", "Cornell Box (with mirror)", "Cornell Box (spherical light and mirror)", "Cornell Box (Transparent)", "Monkey", "Dragon", /* "AABBs",*/ "Spheres", /*"Mixed",*/ "Custom" };
             if (ImGui::Combo("Scenes", reinterpret_cast<int*>(&sceneType), items.data(), int(items.size()))) {
                 optDebugRay.reset();
                 scene = loadScene(sceneType, dataPath);
@@ -248,6 +237,7 @@ int main(int argc, char** argv)
         ImGui::Checkbox("Draw Direct Light", &debugHardShadows);
         ImGui::Checkbox("Draw Normals", &debugNormals);
         ImGui::Checkbox("Draw Reflections", &debugReflections);
+        ImGui::Checkbox("Draw Transmissions", &debugTransmissions);
         
         ImGui::Spacing();
         ImGui::Separator();
@@ -582,11 +572,56 @@ static glm::vec3 getSpecularLighting(const Scene& scene, Ray ray, HitInfo hitInf
     return totalVector;
 }
 
-static glm::vec3 getReflectedLight(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo, int depth){
-    Ray reflection;
-    reflection.t = std::numeric_limits<float>::max();
-    reflection.origin = ray.origin + ray.direction * (ray.t - EPSILON);
-    reflection.direction = Reflect(-ray.direction, hitInfo.normal);
-    return getFinalColor(scene, bvh, reflection, depth + 1);
+static glm::vec3 getCombReflRefr(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo, int depth){
+    // Since we don't have extinction coefficients available, we can't use fully scientifically accurate formulas for computing reflections and transmissions (Fresnel).
+    // Hence we will be using a combination of a base opacity value and a variation of the Schlick's approximation for the reflections/transmissions ratio and Snell's law for the actual refractions
+    float cosi = std::max(-1.0f, std::min(1.0f, glm::dot(glm::normalize(ray.direction), hitInfo.normal)));
+    glm::vec3 refN = hitInfo.normal;
+    if(cosi < 0){
+        cosi = -cosi;
+    } else {
+        cosi = 1 - std::abs(cosi);
+        refN = -hitInfo.normal;
+    }
+    
+    glm::vec3 refractDir = RefractDir(ray.direction, hitInfo.normal, hitInfo.material.ior);
+    glm::vec3 reflectDir = glm::reflect(ray.direction, refN);
+    glm::vec3 rayOrigin = ray.origin + ray.direction * ray.t;
 
+    float ratioRef;
+    if(refractDir==glm::vec3{0.0f}){
+        ratioRef = 1.0; // Full internal reflection
+    } else {
+        ratioRef = hitInfo.material.transparency + (1.0f-hitInfo.material.transparency)*std::pow(1.0f - cosi, 5);
+    }
+
+    glm::vec3 final(0.0f);
+    if(ratioRef>0 && hitInfo.material.ks!=glm::vec3(0.0f)){
+        Ray refl;
+        refl.direction = reflectDir;
+        refl.origin = rayOrigin - ray.direction * EPSILON;
+        final += ratioRef * hitInfo.material.ks * getFinalColor(scene, bvh, refl, depth+1, true);
+        if(debugReflections)
+            drawRay(refl, ratioRef * (refl.t==std::numeric_limits<float>::max()? glm::vec3(1.0f, 0.0f, 0.0f): glm::vec3(1.0f)));
+    }
+    if(ratioRef<1 && hitInfo.material.kt!=glm::vec3(0.0f)){
+        Ray refr;
+        refr.direction = refractDir;
+        refr.origin = rayOrigin + ray.direction * EPSILON;
+        final += (1 - ratioRef) * hitInfo.material.kt * getFinalColor(scene, bvh, refr, depth+1, true);
+        if(debugTransmissions)
+            drawRay(refr, (1.0f - ratioRef) * (refr.t==std::numeric_limits<float>::max()? glm::vec3(1.0f, 0.0f, 0.0f): glm::vec3(1.0f)));
+    }
+    return final;
+}
+
+static glm::vec3 RefractDir(glm::vec3& vec, glm::vec3& norm, float nextIOR, float currentIOR){
+    float dot = std::max(-1.0f, std::min(1.0f, glm::dot(glm::normalize(vec), norm))); 
+    glm::vec3 refN = norm; 
+    if (dot < 0) { dot = -dot; } else { std::swap(currentIOR, nextIOR); refN= -norm; } 
+    float ratioIOR = currentIOR / nextIOR; 
+    float k = 1 - ratioIOR * ratioIOR * (1 - dot * dot);
+    if(k<0)
+        return glm::vec3 { 0.0f };
+    return ratioIOR * vec + (ratioIOR * dot - sqrtf(k)) * refN; 
 }
