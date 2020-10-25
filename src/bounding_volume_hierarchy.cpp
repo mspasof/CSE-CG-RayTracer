@@ -1,27 +1,65 @@
 #include "bounding_volume_hierarchy.h"
 #include "draw.h"
 
+Node root;
+
 BoundingVolumeHierarchy::BoundingVolumeHierarchy(Scene* pScene)
     : m_pScene(pScene)
 {
-
+    
+    root.boundingbox = calculateAAB(pScene->meshes[0]);
     // as an example of how to iterate over all meshes in the scene, look at the intersect method below
 }
+
+//Node constructNode(Mesh mesh, int level) {
+//
+//}
+//
+//Node constructTree(Mesh& mesh, int level) {
+//    //return Node(mesh, level);
+//}
+
+AxisAlignedBox BoundingVolumeHierarchy::calculateAAB(Mesh& mesh) {
+    AxisAlignedBox box;
+
+    if (mesh.vertices.size() == 0) return box;
+
+    float minx = mesh.vertices[0].p.x;
+    float miny = mesh.vertices[0].p.y;
+    float minz = mesh.vertices[0].p.z;
+    float maxx = mesh.vertices[0].p.x;
+    float maxy = mesh.vertices[0].p.y;
+    float maxz = mesh.vertices[0].p.z;
+
+    for (const auto& v : mesh.vertices) {
+        if (v.p.x < minx) minx = v.p.x;
+        if (v.p.y < miny) miny = v.p.y;
+        if (v.p.z < minz) minz = v.p.z;
+        if (v.p.x > maxx) maxx = v.p.x;
+        if (v.p.y > maxy) maxy = v.p.y;
+        if (v.p.z > maxz) maxz = v.p.z;
+    }
+
+    box.lower = glm::vec3{ minx, miny, minz };
+    box.upper = glm::vec3{ maxx, maxy, maxz };
+    return box;
+}
+
 
 // Use this function to visualize your BVH. This can be useful for debugging. Use the functions in
 // draw.h to draw the various shapes. We have extended the AABB draw functions to support wireframe
 // mode, arbitrary colors and transparency.
 void BoundingVolumeHierarchy::debugDraw(int level)
 {
-
     // Draw the AABB as a transparent green box.
     //AxisAlignedBox aabb{ glm::vec3(-0.05f), glm::vec3(0.05f, 1.05f, 1.05f) };
     //drawShape(aabb, DrawMode::Filled, glm::vec3(0.0f, 1.0f, 0.0f), 0.2f);
 
     // Draw the AABB as a (white) wireframe box.
-    AxisAlignedBox aabb { glm::vec3(-0.05f), glm::vec3(0.05f, 1.05f, 1.05f) };
+    // AxisAlignedBox aabb { glm::vec3(-0.05f), glm::vec3(0.05f, 1.05f, 1.05f) };
     //drawAABB(aabb, DrawMode::Wireframe);
-    drawAABB(aabb, DrawMode::Filled, glm::vec3(0.05f, 1.0f, 0.05f), 0.1);
+    //drawAABB(aabb, DrawMode::Filled, glm::vec3(0.05f, 1.0f, 0.05f), 0.1);
+    drawAABB(root.boundingbox, DrawMode::Filled, glm::vec3(0.0f, 1.0f, 0.0f), 0.1);
 }
 
 int BoundingVolumeHierarchy::numLevels() const
