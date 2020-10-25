@@ -25,7 +25,7 @@ bool pointInTriangle(const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& 
 
 bool intersectRayWithPlane(const Plane& plane, Ray& ray)
 {
-    float angle = glm::dot(glm::normalize(ray.direction), plane.normal);
+    float angle = glm::dot(ray.direction, plane.normal);
     if (angle == 0)
         return false;
 
