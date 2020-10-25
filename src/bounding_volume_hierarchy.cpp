@@ -6,8 +6,11 @@ Node root;
 BoundingVolumeHierarchy::BoundingVolumeHierarchy(Scene* pScene)
     : m_pScene(pScene)
 {
-    
-    root.boundingbox = calculateAAB(pScene->meshes[0]);
+    for (Mesh m : pScene->meshes) {
+        Node root;
+        root.boundingbox = calculateAAB(m);
+        BoundingVolumeHierarchy::nodes.push_back(root);
+    }
     // as an example of how to iterate over all meshes in the scene, look at the intersect method below
 }
 
@@ -59,7 +62,9 @@ void BoundingVolumeHierarchy::debugDraw(int level)
     // AxisAlignedBox aabb { glm::vec3(-0.05f), glm::vec3(0.05f, 1.05f, 1.05f) };
     //drawAABB(aabb, DrawMode::Wireframe);
     //drawAABB(aabb, DrawMode::Filled, glm::vec3(0.05f, 1.0f, 0.05f), 0.1);
-    drawAABB(root.boundingbox, DrawMode::Filled, glm::vec3(0.0f, 1.0f, 0.0f), 0.1);
+    for (Node node : BoundingVolumeHierarchy::nodes) {
+        drawAABB(node.boundingbox, DrawMode::Filled, glm::vec3(0.0f, 1.0f, 0.0f), 0.1);
+    }
 }
 
 int BoundingVolumeHierarchy::numLevels() const
