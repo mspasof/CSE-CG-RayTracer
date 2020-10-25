@@ -123,8 +123,10 @@ std::vector<Mesh> loadMesh(const std::filesystem::path& file, bool centerAndNorm
 
             mesh.material.kd = getMaterialColor(AI_MATKEY_COLOR_DIFFUSE);
             mesh.material.ks = getMaterialColor(AI_MATKEY_COLOR_SPECULAR);
+            mesh.material.kt = getMaterialColor(AI_MATKEY_COLOR_TRANSPARENT);
             mesh.material.shininess = getMaterialFloat(AI_MATKEY_SHININESS);
             mesh.material.transparency = getMaterialFloat(AI_MATKEY_OPACITY);
+            mesh.material.ior = getMaterialFloat(AI_MATKEY_REFRACTI);
             out.emplace_back(std::move(mesh));
         }
 

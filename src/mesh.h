@@ -16,10 +16,13 @@ struct Vertex {
 
 struct Material {
     glm::vec3 kd; // Diffuse color.
-    glm::vec3 ks { 0.0f };
+    glm::vec3 ks { 0.0f }; // Specular color.
+    glm::vec3 kt { 0.0f }; // Transmission color.
+
     float shininess { 1.0f };
 
     float transparency { 1.0f };
+    float ior { 1.0f };
 };
 
 using Triangle = glm::uvec3;
