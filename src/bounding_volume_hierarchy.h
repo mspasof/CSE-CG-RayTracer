@@ -8,6 +8,7 @@ struct Node {
     AxisAlignedBox boundingbox;
     int level;
     std::vector<int> children;
+    std::vector<Triangle> triangles;
 };
 
 class BoundingVolumeHierarchy {
@@ -23,6 +24,7 @@ public:
     void debugDraw(int level);
     int numLevels() const;
     AxisAlignedBox calculateAAB(Mesh& mesh);
+    Node constructNode(Mesh mesh, int level);
 
     // Return true if something is hit, returns false otherwise.
     // Only find hits if they are closer than t stored in the ray and the intersection
