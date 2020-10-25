@@ -1,25 +1,25 @@
 #include "bounding_volume_hierarchy.h"
 #include "draw.h"
 
-Node root;
-
 BoundingVolumeHierarchy::BoundingVolumeHierarchy(Scene* pScene)
     : m_pScene(pScene)
 {
     for (Mesh m : pScene->meshes) {
-        Node root;
-        root.boundingbox = calculateAAB(m);
-        BoundingVolumeHierarchy::nodes.push_back(root);
+        BoundingVolumeHierarchy::nodes.push_back(constructNode(m, 0));
     }
-    // as an example of how to iterate over all meshes in the scene, look at the intersect method below
 }
 
-//Node constructNode(Mesh mesh, int level) {
-//
-//}
-//
+Node BoundingVolumeHierarchy::constructNode(Mesh mesh, int level) {
+    Node node;
+    node.boundingbox = calculateAAB(mesh);
+    for (Triangle triangle : mesh.triangles) {
+        node.triangles.push_back(triangle); // should I push them back one by one or just copy the whole triangles vector at once?
+    }
+    return node;
+}
+
 //Node constructTree(Mesh& mesh, int level) {
-//    //return Node(mesh, level);
+//    return Node(mesh, level);
 //}
 
 AxisAlignedBox BoundingVolumeHierarchy::calculateAAB(Mesh& mesh) {
