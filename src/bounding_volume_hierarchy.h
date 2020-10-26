@@ -3,28 +3,34 @@
 #include "scene.h"
 
 struct Node {
-    int index = 0;
     bool isLeaf;
     AxisAlignedBox boundingbox;
-    int level;
-    std::vector<int> children;
-    std::vector<Triangle> triangles;
+    std::vector<int> indeces;
+};
+
+struct Tri {
+    glm::vec3 a,b,c;
 };
 
 class BoundingVolumeHierarchy {
 
     std::vector<Node> nodes;
-    //triangles??
-    //tree
-
 public:
     BoundingVolumeHierarchy(Scene* pScene);
 
     // Use this function to visualize your BVH. This can be useful for debugging.
     void debugDraw(int level);
     int numLevels() const;
+    void buildTree(int currentLevel, std::vector<Tri>& triangles);
+    void splitByBinning(std::vector<Tri>& triangles, int currentLevel, int index);
+    void appendChildren(AxisAlignedBox& first, AxisAlignedBox& second, std::vector<Tri>& arr, int currentLevel, int index);
+    float eval(AxisAlignedBox& first, AxisAlignedBox& second, Node& nodeToSplit, std::vector<Tri>& arr);
+    bool isInsideAABB(AxisAlignedBox& aabb, Tri& t);
+    AxisAlignedBox defineAABB(std::vector<int>& ind, std::vector<Tri>& arr);
     AxisAlignedBox calculateAAB(Mesh& mesh);
+    AxisAlignedBox calculateParentAAB(Scene* pScene);
     Node constructNode(Mesh mesh, int level);
+    Node constructParent(Scene* pScene, std::vector<Tri>& triangles);
 
     // Return true if something is hit, returns false otherwise.
     // Only find hits if they are closer than t stored in the ray and the intersection
@@ -34,3 +40,4 @@ public:
 private:
     Scene* m_pScene;
 };
+
