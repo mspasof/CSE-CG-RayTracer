@@ -10,4 +10,6 @@ struct Ray {
     glm::vec3 origin { 0.0f };
     glm::vec3 direction { 0.0f, 0.0f, -1.0f };
     float t { std::numeric_limits<float>::max() };
+    bool refraction = false;
+    float strength = 1.0f;
 };
