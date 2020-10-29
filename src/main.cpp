@@ -38,6 +38,7 @@ bool debugHardShadows = false;
 bool debugNormals = false;
 bool debugReflections = false;
 bool debugTransmissions = false;
+bool debugSpecular = false;
 
 enum class ViewMode {
     Rasterization = 0,
@@ -46,7 +47,7 @@ enum class ViewMode {
 
 
 static glm::vec3 getDiffuseLighting(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo);
-static glm::vec3 getSpecularLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
+static glm::vec3 getSpecularLighting(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo);
 static glm::vec3 getCombReflRefr(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo, int depth);static glm::vec3 ReflectDir(glm::vec3 vec, glm::vec3 norm);
 static glm::vec3 RefractDir(glm::vec3& vec, glm::vec3& norm, float nextIOR, float currentIOR = 1.0f);
 
@@ -60,7 +61,7 @@ void clampLight(glm::vec3& light){
 }
 
 
-bool isVisibleByPointLight(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray toPoint, PointLight pointLight){
+bool isVisibleByPointLight(const Scene& scene, Ray toPoint, PointLight pointLight){
     HitInfo hitInfo;
     
     Ray pointToLight;
@@ -70,7 +71,18 @@ bool isVisibleByPointLight(const Scene& scene, const BoundingVolumeHierarchy& bv
     pointToLight.direction = glm::normalize(pointToLight.direction);
 
     bool intersect = false;
-    if(bvh.intersect(pointToLight, hitInfo)) intersect = true;
+    for (const auto& mesh : scene.meshes) {
+        for (const auto& tri : mesh.triangles) {
+            const auto v0 = mesh.vertices[tri[0]];
+            const auto v1 = mesh.vertices[tri[1]];
+            const auto v2 = mesh.vertices[tri[2]];
+            if (intersectRayWithTriangle(v0.p, v1.p, v2.p, pointToLight, hitInfo)) { intersect = true; break; }
+        }
+        if(intersect) break;
+    }
+    for (const auto& sphere : scene.spheres){
+        if(intersectRayWithShape(sphere, pointToLight, hitInfo)) { intersect = true; break; };
+    }
 
     // Drawing a red visual debug ray if it intersects any object apart from the pointLight.
     if(debugHardShadows){
@@ -110,7 +122,7 @@ static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy
 
         // Set the color of the pixel to white if the ray hits.
 
-        color += getDiffuseLighting(scene, bvh, ray, hitInfo); // + getSpecularLighting(scene, ray, hitInfo);
+        color += getDiffuseLighting(scene, bvh, ray, hitInfo) + getSpecularLighting(scene, bvh, ray, hitInfo);
         clampLight(color);
         return color;
     } else {
@@ -220,6 +232,7 @@ int main(int argc, char** argv)
         ImGui::Checkbox("Draw Normals", &debugNormals);
         ImGui::Checkbox("Draw Reflections", &debugReflections);
         ImGui::Checkbox("Draw Transmissions", &debugTransmissions);
+        ImGui::Checkbox("Draw Specular Highlights", &debugSpecular);
         
         ImGui::Spacing();
         ImGui::Separator();
@@ -440,7 +453,7 @@ static glm::vec3 getDiffuseLighting(const Scene& scene, const BoundingVolumeHier
     glm::vec3 totalVector = glm::vec3(0.0f);
 
     for (PointLight light : scene.pointLights) {
-        if(!isVisibleByPointLight(scene, bvh, ray, light)) continue;
+        if(!isVisibleByPointLight(scene, ray, light)) continue;
         glm::vec3 lightPos = light.position;
         glm::vec3 pointToLight = lightPos - pointPos;
 
@@ -484,7 +497,7 @@ static glm::vec3 getDiffuseLighting(const Scene& scene, const BoundingVolumeHier
         }
 
         for (PointLight light : placedPointLights) {
-            if(!isVisibleByPointLight(scene, bvh, ray, light)) continue;
+            if(!isVisibleByPointLight(scene, ray, light)) continue;
             glm::vec3 lightPos = light.position;
             glm::vec3 pointToLight = lightPos - pointPos;
 
@@ -516,42 +529,24 @@ static glm::vec3 getDiffuseLighting(const Scene& scene, const BoundingVolumeHier
 }
 
 
-static glm::vec3 getSpecularLighting(const Scene& scene, Ray ray, HitInfo hitInfo) {
-    const glm::vec3 Ks = hitInfo.material.ks;
-    const float s = hitInfo.material.shininess;
-
-    glm::vec3 normal = hitInfo.normal;
-    if (glm::dot(glm::normalize(hitInfo.normal), glm::normalize(ray.direction)) > 0)
-        normal = -hitInfo.normal;
-
-    const glm::vec3 pointPos = ray.origin + ray.t * ray.direction;
+static glm::vec3 getSpecularLighting(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo) {
+    const glm::vec3 point = ray.origin + ray.t * ray.direction;
 
     glm::vec3 totalVector = glm::vec3(0.0f);
 
     for (PointLight light : scene.pointLights) {
-        glm::vec3 lightPos = light.position;
-        glm::vec3 lightToPoint = pointPos - lightPos;
-        glm::vec3 reflection = glm::normalize(glm::reflect(glm::normalize(lightToPoint), glm::normalize(normal)));
-        glm::vec3 view = ray.origin - pointPos;
-
-        float coefficient = glm::pow((glm::dot(glm::normalize(reflection), glm::normalize(view))), s);
-
-        if (coefficient < 0.0f)
-            coefficient = 0.0f;
-
-        glm::vec3 lightcolor = light.color;
-
-        glm::vec3 individualVector = Ks * lightcolor * coefficient;
-
-        totalVector += individualVector;
+        if(isVisibleByPointLight(scene, ray, light)){
+            float coefficient = glm::pow(std::max(0.0f, glm::dot(glm::reflect(point - light.position, hitInfo.normal), -ray.direction)), hitInfo.material.shininess);
+            totalVector += hitInfo.material.ks * light.color * coefficient;
+            if(debugSpecular){
+                Ray toLight;
+                toLight.origin = point;
+                toLight.direction = light.position - point;
+                toLight.t = 1;
+                drawRay(toLight, glm::vec3(coefficient));
+            }
+        }
     }
-
-    if (totalVector.x > 1.0f)
-        totalVector.x = 1.0f;
-    if (totalVector.y > 1.0f)
-        totalVector.y = 1.0f;
-    if (totalVector.z > 1.0f)
-        totalVector.z = 1.0f;
 
     return totalVector;
 }
