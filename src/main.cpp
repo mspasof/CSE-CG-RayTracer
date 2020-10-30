@@ -37,6 +37,8 @@ int maxReflectionDepth = reflectionDepthLimit;
 bool debugHardShadows = false;
 bool debugNormals = false;
 bool debugReflections = false;
+bool debugTransmissions = false;
+bool debugSpecular = false;
 
 enum class ViewMode {
     Rasterization = 0,
@@ -44,19 +46,10 @@ enum class ViewMode {
 };
 
 
-static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
-static glm::vec3 getSpecularLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
-
-/**
- * @brief Takes a vector and reflects it across the given normal.
- * 
- * @param vec vector to reflect
- * @param norm normal
- * @return glm::vec3 reflected ray direction
- */
-glm::vec3 Reflect(glm::vec3 vec, glm::vec3 norm){
-    return 2*std::max(0.0f, glm::dot(glm::normalize(vec), norm))*norm - vec;
-}
+static glm::vec3 getDiffuseLighting(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo);
+static glm::vec3 getSpecularLighting(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo);
+static glm::vec3 getCombReflRefr(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo, int depth);static glm::vec3 ReflectDir(glm::vec3 vec, glm::vec3 norm);
+static glm::vec3 RefractDir(glm::vec3& vec, glm::vec3& norm, float nextIOR, float currentIOR = 1.0f);
 
 void clampLight(glm::vec3& light){
     if (light.x > 1.0f)
@@ -68,25 +61,41 @@ void clampLight(glm::vec3& light){
 }
 
 
-bool isVisibleByPointLight(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo& hitInfo, PointLight pointLight){
-    Ray rayToPointLightSource;
-    rayToPointLightSource.origin = ray.origin + ray.t*ray.direction;
-    rayToPointLightSource.direction = -rayToPointLightSource.origin + pointLight.position;
-    rayToPointLightSource.origin = rayToPointLightSource.origin + EPSILON * rayToPointLightSource.direction;
-    rayToPointLightSource.t = 1;
+bool isVisibleByPointLight(const Scene& scene, Ray toPoint, PointLight pointLight){
+    HitInfo hitInfo;
+    
+    Ray pointToLight;
+    pointToLight.origin = toPoint.origin + toPoint.direction * (toPoint.t - EPSILON);
+    pointToLight.direction = pointLight.position - pointToLight.origin;
+    pointToLight.t = glm::length(pointToLight.direction);
+    pointToLight.direction = glm::normalize(pointToLight.direction);
+
     bool intersect = false;
-    // You can uncomment to next line to draw a ray to each pointLight source regardless of intersections with other objects.
-    // drawRay(rayToPointLightSource, glm::vec3(1));
-    intersect |= bvh.intersect(rayToPointLightSource, hitInfo);
+
+    for (const auto& mesh : scene.meshes) {
+        for (const auto& tri : mesh.triangles) {
+            const auto v0 = mesh.vertices[tri[0]];
+            const auto v1 = mesh.vertices[tri[1]];
+            const auto v2 = mesh.vertices[tri[2]];
+            if (intersectRayWithTriangle(v0.p, v1.p, v2.p, pointToLight, hitInfo)) { intersect = true; break; }
+        }
+        if(intersect) break;
+    }
+    for (const auto& sphere : scene.spheres){
+        if(intersectRayWithShape(sphere, pointToLight, hitInfo)) { intersect = true; break; };
+    }
+
     // Drawing a red visual debug ray if it intersects any object apart from the pointLight.
-    if(intersect == true) drawRay(rayToPointLightSource, glm::vec3(1.0f, 0.0f, 0.0f));
-    else drawRay(rayToPointLightSource, glm::vec3(1.0f));
+    if(debugHardShadows){
+        if(intersect == true) drawRay(pointToLight, glm::vec3(1.0f, 0.0f, 0.0f));
+        else drawRay(pointToLight, glm::vec3(1.0f));
+    }
     return !intersect;
 }
 
 float percentageIllumination(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo, SphericalLight sphericalLight) {
     // Actual number of samples is 2*(samples-1) + 1 per axis
-    const int samples = 8;
+    const int samples = 25;
     int numVisibleLightPoints = 0;
     PointLight lightXshift = PointLight();
     PointLight lightYshift = PointLight();
@@ -106,7 +115,7 @@ float percentageIllumination(const Scene& scene, const BoundingVolumeHierarchy& 
             (void)intersectRayWithShape(sphere, rayInLight, hitInfo);
             lightCenter.position = rayInLight.origin + rayInLight.t * rayInLight.direction;
             lightCenter.color = sphericalLight.color;
-            if(isVisibleByPointLight(scene, bvh, ray, hitInfo, lightCenter)) numVisibleLightPoints++;
+            if(isVisibleByPointLight(scene, ray, lightCenter)) numVisibleLightPoints++;
         }
         else {
             float shift = (((float)i/samples) * sphericalLight.radius);
@@ -117,7 +126,7 @@ float percentageIllumination(const Scene& scene, const BoundingVolumeHierarchy& 
             (void)intersectRayWithShape(sphere, rayInLight, hitInfo);
             lightXshift.position = rayInLight.origin + rayInLight.t * rayInLight.direction;
             lightXshift.color = sphericalLight.color;
-            if(isVisibleByPointLight(scene, bvh, ray, hitInfo, lightXshift)) numVisibleLightPoints++;
+            if(isVisibleByPointLight(scene, ray, lightXshift)) numVisibleLightPoints++;
 
             rayInLight.origin = sphericalLight.position + glm::vec3(0, shift, 0);
             rayInLight.direction = -rayInLight.origin + ray.origin + ray.t * ray.direction;
@@ -125,7 +134,7 @@ float percentageIllumination(const Scene& scene, const BoundingVolumeHierarchy& 
             (void)intersectRayWithShape(sphere, rayInLight, hitInfo);
             lightYshift.position = rayInLight.origin + rayInLight.t * rayInLight.direction;
             lightYshift.color = sphericalLight.color;
-            if(isVisibleByPointLight(scene, bvh, ray, hitInfo, lightYshift)) numVisibleLightPoints++;
+            if(isVisibleByPointLight(scene, ray, lightYshift)) numVisibleLightPoints++;
 
             rayInLight.origin = sphericalLight.position + glm::vec3(0, 0, shift);
             rayInLight.direction = -rayInLight.origin + ray.origin + ray.t * ray.direction;
@@ -133,7 +142,7 @@ float percentageIllumination(const Scene& scene, const BoundingVolumeHierarchy& 
             (void)intersectRayWithShape(sphere, rayInLight, hitInfo);
             lightZshift.position = rayInLight.origin + rayInLight.t * rayInLight.direction;
             lightZshift.color = sphericalLight.color;
-            if(isVisibleByPointLight(scene, bvh, ray, hitInfo, lightZshift)) numVisibleLightPoints++;
+            if(isVisibleByPointLight(scene, ray, lightZshift)) numVisibleLightPoints++;
         }
     }
     //Get the percentage of visibility for this specific spherical light, ranging from 0 to 1.
@@ -142,33 +151,21 @@ float percentageIllumination(const Scene& scene, const BoundingVolumeHierarchy& 
 }
 
 
-static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo);
-static glm::vec3 getReflectedLight(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo, int depth);
-
 // NOTE(Mathijs): separate function to make recursion easier (could also be done with lambda + std::function).
-static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, int depth)
+static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray& refRay, int depth, bool changeRay = false)
 {
     HitInfo hitInfo;
-    
+    Ray ray = refRay;
     if (bvh.intersect(ray, hitInfo)) {
-
+        if(changeRay)
+            refRay.t = ray.t;
         glm::vec3 color(0.0f);
-        // Draw a white debug ray.
-        bool glob = false;
-        if(depth == 0 || debugReflections)
+
+        if(depth == 0)
             drawRay(ray, glm::vec3(1.0f));
-        for(const auto& pointLight : scene.pointLights) {
-            glob |= isVisibleByPointLight(scene, bvh, ray, hitInfo, pointLight);
-        }
-        float overallIlluminationBySphericalLights = 0.0f;
-        for(const auto& sphericalLight : scene.sphericalLight) {
-            overallIlluminationBySphericalLights+=percentageIllumination(scene, bvh, ray, hitInfo, sphericalLight);
-        }
-        if(!scene.sphericalLight.empty()) overallIlluminationBySphericalLights = overallIlluminationBySphericalLights / scene.sphericalLight.size();
-        return glm::vec3(1.0f);
-        if(depth<=maxReflectionDepth && hitInfo.material.ks!=glm::vec3(0.0f)){
-            color += hitInfo.material.ks * getReflectedLight(scene, bvh, ray, hitInfo, depth);
-        }
+
+        if(depth<=maxReflectionDepth)
+            color += getCombReflRefr(scene, bvh, ray, hitInfo, depth);
 
         if(debugNormals){
             Ray normal;
@@ -180,12 +177,13 @@ static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy
 
         // Set the color of the pixel to white if the ray hits.
 
-        color += getDiffuseLighting(scene, ray, hitInfo) + getSpecularLighting(scene, ray, hitInfo);
+        color += getDiffuseLighting(scene, bvh, ray, hitInfo) + getSpecularLighting(scene, bvh, ray, hitInfo);
         clampLight(color);
         return color;
     } else {
         // Draw a red debug ray if the ray missed.
-        drawRay(ray, glm::vec3(1.0f, 0.0f, 0.0f));
+        if(depth==0)
+            drawRay(ray, glm::vec3(1.0f, 0.0f, 0.0f));
         // Set the color of the pixel to black if the ray misses.
         return glm::vec3(0.0f);
     }
@@ -206,7 +204,7 @@ static void renderRayTracing(const Scene& scene, const Trackball& camera, const 
                 float(x) / windowResolution.x * 2.0f - 1.0f,
                 float(y) / windowResolution.y * 2.0f - 1.0f
             };
-            const Ray cameraRay = camera.generateRay(normalizedPixelPos);
+            Ray cameraRay = camera.generateRay(normalizedPixelPos);
             screen.setPixel(x, y, getFinalColor(scene, bvh, cameraRay, 0));
         }
     }
@@ -255,7 +253,7 @@ int main(int argc, char** argv)
         // === Setup the UI ===
         ImGui::Begin("Final Project - Part 2");
         {
-            constexpr std::array items { "SingleTriangle", "Cube", "Cornell Box (with mirror)", "Cornell Box (spherical light and mirror)", "Monkey", "Dragon", /* "AABBs",*/ "Spheres", /*"Mixed",*/ "Custom" };
+            constexpr std::array items { "SingleTriangle", "Cube", "Cornell Box (with mirror)", "Cornell Box (spherical light and mirror)", "Cornell Box (Transparent)", "Monkey", "Dragon", /* "AABBs",*/ "Spheres", /*"Mixed",*/ "Custom" };
             if (ImGui::Combo("Scenes", reinterpret_cast<int*>(&sceneType), items.data(), int(items.size()))) {
                 optDebugRay.reset();
                 scene = loadScene(sceneType, dataPath);
@@ -288,6 +286,8 @@ int main(int argc, char** argv)
         ImGui::Checkbox("Draw Direct Light", &debugHardShadows);
         ImGui::Checkbox("Draw Normals", &debugNormals);
         ImGui::Checkbox("Draw Reflections", &debugReflections);
+        ImGui::Checkbox("Draw Transmissions", &debugTransmissions);
+        ImGui::Checkbox("Draw Specular Highlights", &debugSpecular);
         
         ImGui::Spacing();
         ImGui::Separator();
@@ -496,7 +496,7 @@ static void renderOpenGL(const Scene& scene, const Trackball& camera, int select
     drawSphere(camera.lookAt(), 0.01f, glm::vec3(0.2f, 0.2f, 1.0f));
 }
 
-static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo) {
+static glm::vec3 getDiffuseLighting(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo) {
     const glm::vec3 Kd = hitInfo.material.kd;
 
     glm::vec3 normal = hitInfo.normal;
@@ -508,6 +508,7 @@ static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo
     glm::vec3 totalVector = glm::vec3(0.0f);
 
     for (PointLight light : scene.pointLights) {
+        if(!isVisibleByPointLight(scene, ray, light)) continue;
         glm::vec3 lightPos = light.position;
         glm::vec3 pointToLight = lightPos - pointPos;
 
@@ -526,107 +527,91 @@ static glm::vec3 getDiffuseLighting(const Scene& scene, Ray ray, HitInfo hitInfo
     }
 
 
-    const int N = 20; // number of points that will be distributed on the sphere
-    for (SphericalLight sph_light : scene.sphericalLight) {
-        std::vector<PointLight> placedPointLights;
-
-        const double phi = (sqrt(5.0) + 1.0) / 2.0; // golden ratio
-        const double g = (2.0 * glm::pi<float>()) * (2.0 - phi);  //golden angle
-
-        for (int i = 1; i <= N; i++) {
-            const double lat = asin(-1.0 + 2.0 * double(i) / (N + 1));
-            const double lon = g * i;
-
-            const double x = cos(lon) * cos(lat);
-            const double y = sin(lon) * cos(lat);
-            const double z = sin(lat);
-
-            PointLight pointlight;
-            pointlight.position = glm::vec3{ x, y, z } * sph_light.radius + sph_light.position;
-            pointlight.color = sph_light.color;
-            placedPointLights.push_back(pointlight);
-
-            // above method for distributing points over a sphere adapted from:
-            // https://bduvenhage.me/geometry/2019/07/31/generating-equidistant-vectors.html
-        }
-
-        for (PointLight light : placedPointLights) {
-            glm::vec3 lightPos = light.position;
-            glm::vec3 pointToLight = lightPos - pointPos;
-
-            float coefficient = glm::dot(glm::normalize(normal), glm::normalize(pointToLight));
-
-            if (coefficient < 0.0f)
-                coefficient = 0.0f;
-
-            float distance2 = glm::dot(pointToLight, pointToLight);
-            glm::vec3 lightcolor = light.color;
-
-            coefficient = coefficient / distance2 / N;
-            glm::vec3 individualVector = Kd * lightcolor * coefficient;
-
-            totalVector += individualVector;
-        }
+    for(const auto& sphericalLight : scene.sphericalLight) {
+        glm::vec3 toLight = sphericalLight.position - pointPos;
+        totalVector+= hitInfo.material.kd * sphericalLight.color * percentageIllumination(scene, bvh, ray, hitInfo, sphericalLight) * glm::dot(hitInfo.normal, toLight) / glm::dot(toLight, toLight);
     }
-
-    if (totalVector.x > 1.0f)
-        totalVector.x = 1.0f;
-    if (totalVector.y > 1.0f)
-        totalVector.y = 1.0f;
-    if (totalVector.z > 1.0f)
-        totalVector.z = 1.0f;
-
-    clampLight(totalVector);
 
     return totalVector;
 }
 
 
-static glm::vec3 getSpecularLighting(const Scene& scene, Ray ray, HitInfo hitInfo) {
-    const glm::vec3 Ks = hitInfo.material.ks;
-    const float s = hitInfo.material.shininess;
-
-    glm::vec3 normal = hitInfo.normal;
-    if (glm::dot(glm::normalize(hitInfo.normal), glm::normalize(ray.direction)) > 0)
-        normal = -hitInfo.normal;
-
-    const glm::vec3 pointPos = ray.origin + ray.t * ray.direction;
+static glm::vec3 getSpecularLighting(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo) {
+    const glm::vec3 point = ray.origin + ray.t * ray.direction;
 
     glm::vec3 totalVector = glm::vec3(0.0f);
 
     for (PointLight light : scene.pointLights) {
-        glm::vec3 lightPos = light.position;
-        glm::vec3 lightToPoint = pointPos - lightPos;
-        glm::vec3 reflection = glm::normalize(glm::reflect(glm::normalize(lightToPoint), glm::normalize(normal)));
-        glm::vec3 view = ray.origin - pointPos;
-
-        float coefficient = glm::pow((glm::dot(glm::normalize(reflection), glm::normalize(view))), s);
-
-        if (coefficient < 0.0f)
-            coefficient = 0.0f;
-
-        glm::vec3 lightcolor = light.color;
-
-        glm::vec3 individualVector = Ks * lightcolor * coefficient;
-
-        totalVector += individualVector;
+        if(isVisibleByPointLight(scene, ray, light)){
+            float coefficient = glm::pow(std::max(0.0f, glm::dot(glm::reflect(point - light.position, hitInfo.normal), -ray.direction)), hitInfo.material.shininess);
+            totalVector += hitInfo.material.ks * light.color * coefficient;
+            if(debugSpecular){
+                Ray toLight;
+                toLight.origin = point;
+                toLight.direction = light.position - point;
+                toLight.t = 1;
+                drawRay(toLight, glm::vec3(coefficient));
+            }
+        }
     }
-
-    if (totalVector.x > 1.0f)
-        totalVector.x = 1.0f;
-    if (totalVector.y > 1.0f)
-        totalVector.y = 1.0f;
-    if (totalVector.z > 1.0f)
-        totalVector.z = 1.0f;
 
     return totalVector;
 }
 
-static glm::vec3 getReflectedLight(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo, int depth){
-    Ray reflection;
-    reflection.t = std::numeric_limits<float>::max();
-    reflection.origin = ray.origin + ray.direction * (ray.t - EPSILON);
-    reflection.direction = Reflect(-ray.direction, hitInfo.normal);
-    return getFinalColor(scene, bvh, reflection, depth + 1);
+static glm::vec3 getCombReflRefr(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo, int depth){
+    // Since we don't have extinction coefficients available, we can't use fully scientifically accurate formulas for computing reflections and transmissions (Fresnel).
+    // Hence we will be using a combination of a base opacity value and a variation of the Schlick's approximation for the reflections/transmissions ratio and Snell's law for the actual refractions
+    float cosi = std::max(-1.0f, std::min(1.0f, glm::dot(glm::normalize(ray.direction), hitInfo.normal)));
+    glm::vec3 refN = hitInfo.normal;
+    if(cosi < 0){
+        cosi = -cosi;
+    } else {
+        cosi = 1 - std::abs(cosi);
+        refN = -hitInfo.normal;
+    }
+    
+    glm::vec3 refractDir = RefractDir(ray.direction, hitInfo.normal, hitInfo.material.ior);
+    glm::vec3 reflectDir = glm::reflect(ray.direction, refN);
+    glm::vec3 rayOrigin = ray.origin + ray.direction * ray.t;
 
+    float ratioRef;
+    if(refractDir==glm::vec3{0.0f}){
+        ratioRef = 1.0; // Full internal reflection
+    } else {
+        ratioRef = hitInfo.material.transparency + (1.0f-hitInfo.material.transparency)*std::pow(1.0f - cosi, 5);
+    }
+
+    glm::vec3 final(0.0f);
+    if(ratioRef>0 && hitInfo.material.ks!=glm::vec3(0.0f) && (!ray.refraction || refractDir==glm::vec3{0.0f})){
+        Ray refl;
+        refl.direction = reflectDir;
+        refl.origin = rayOrigin - ray.direction * EPSILON;
+        refl.refraction = ray.refraction;
+        refl.strength = (ray.refraction ? 1.0f : ratioRef) * ray.strength;
+        final += (ray.refraction? glm::vec3(1.0f) : ratioRef*hitInfo.material.ks) * getFinalColor(scene, bvh, refl, depth+1, true);
+        if(debugReflections)
+            drawRay(refl, refl.strength * (refl.t==std::numeric_limits<float>::max()? glm::vec3(1.0f, 0.0f, 0.0f): glm::vec3(1.0f)));
+    }
+    if(ratioRef<1 && hitInfo.material.kt!=glm::vec3(0.0f)){
+        Ray refr;
+        refr.direction = refractDir;
+        refr.origin = rayOrigin + ray.direction * EPSILON;
+        refr.refraction = !ray.refraction;
+        refr.strength = (ray.refraction ? 1.0f : (1.0f - ratioRef)) * ray.strength;
+        final += (ray.refraction ? glm::vec3(1.0f) : (1 - ratioRef) * hitInfo.material.kt) * getFinalColor(scene, bvh, refr, depth+1, true);
+        if(debugTransmissions)
+            drawRay(refr, refr.strength * (refr.t==std::numeric_limits<float>::max()? glm::vec3(1.0f, 0.0f, 0.0f): glm::vec3(1.0f)));
+    }
+    return final;
+}
+
+static glm::vec3 RefractDir(glm::vec3& vec, glm::vec3& norm, float nextIOR, float currentIOR){
+    float dot = std::max(-1.0f, std::min(1.0f, glm::dot(glm::normalize(vec), norm))); 
+    glm::vec3 refN = norm; 
+    if (dot < 0) { dot = -dot; } else { std::swap(currentIOR, nextIOR); refN= -norm; } 
+    float ratioIOR = currentIOR / nextIOR; 
+    float k = 1 - ratioIOR * ratioIOR * (1 - dot * dot);
+    if(k<0)
+        return glm::vec3 { 0.0f };
+    return ratioIOR * vec + (ratioIOR * dot - sqrtf(k)) * refN; 
 }

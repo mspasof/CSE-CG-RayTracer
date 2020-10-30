@@ -15,6 +15,7 @@ enum SceneType {
     Cube,
     CornellBox,
     CornellBoxSphericalLight,
+    CornellBoxTransparent,
     Monkey,
     Dragon,
     //AABBs,
