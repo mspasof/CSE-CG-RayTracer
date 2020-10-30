@@ -14,7 +14,6 @@ struct Tri {
 };
 
 class BoundingVolumeHierarchy {
-
 public:
     BoundingVolumeHierarchy(Scene* pScene);
 
@@ -42,4 +41,3 @@ private:
     std::vector<Node> nodes;
     Scene* m_pScene;
 };
-

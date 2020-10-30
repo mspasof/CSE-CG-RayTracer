@@ -139,16 +139,7 @@ void BoundingVolumeHierarchy::appendChildren(AxisAlignedBox& first, AxisAlignedB
     AxisAlignedBox lower = defineAABB(leftChild.indeces);
     AxisAlignedBox upper = defineAABB(rightChild.indeces);
 
-    leftChild.boundingbox = lower;
-    leftChild.isLeaf = true;
-    rightChild.boundingbox = upper;
-    rightChild.isLeaf = true;
-    nodes.at(index).isLeaf = false;
-    nodes.at(index).indeces.clear();
-    nodes.at(index).indeces.push_back(2*index + 1);
-    nodes.at(index).indeces.push_back(2*index + 2);
-    nodes.push_back(leftChild);
-    nodes.push_back(rightChild);
+    // as an example of how to iterate over all meshes in the scene, look at the intersect method below
 }
 
 float BoundingVolumeHierarchy::eval(AxisAlignedBox& first, AxisAlignedBox& second, Node& nodeToSplit) {
@@ -289,34 +280,25 @@ AxisAlignedBox BoundingVolumeHierarchy::calculateAAB(Mesh& mesh) {
     return box;
 }
 
-
 // Use this function to visualize your BVH. This can be useful for debugging. Use the functions in
 // draw.h to draw the various shapes. We have extended the AABB draw functions to support wireframe
 // mode, arbitrary colors and transparency.
 void BoundingVolumeHierarchy::debugDraw(int level)
 {
+
     // Draw the AABB as a transparent green box.
     //AxisAlignedBox aabb{ glm::vec3(-0.05f), glm::vec3(0.05f, 1.05f, 1.05f) };
     //drawShape(aabb, DrawMode::Filled, glm::vec3(0.0f, 1.0f, 0.0f), 0.2f);
 
     // Draw the AABB as a (white) wireframe box.
-    // AxisAlignedBox aabb { glm::vec3(-0.05f), glm::vec3(0.05f, 1.05f, 1.05f) };
+    AxisAlignedBox aabb { glm::vec3(-0.05f), glm::vec3(0.05f, 1.05f, 1.05f) };
     //drawAABB(aabb, DrawMode::Wireframe);
-    //drawAABB(aabb, DrawMode::Filled, glm::vec3(0.05f, 1.0f, 0.05f), 0.1);
-
-    for(int i = int((pow(2, level) - 1)); i < int((pow(2, (level+1)) - 1)); i++) {
-        drawAABB(BoundingVolumeHierarchy::nodes.at(i).boundingbox, DrawMode::Filled, glm::vec3(0.5f, 1.0f, 0.5f), 0.1f);
-    }
-
-    // for (Node node : BoundingVolumeHierarchy::nodes) {
-    //     drawAABB(node.boundingbox, DrawMode::Filled, glm::vec3(0.0f, 1.0f, 0.0f), 0.1);
-    // }
+    drawAABB(aabb, DrawMode::Filled, glm::vec3(0.05f, 1.0f, 0.05f), 0.1);
 }
 
 int BoundingVolumeHierarchy::numLevels() const
 {
-    //return int(log2(BoundingVolumeHierarchy::nodes.size()));
-    return maxLevel + 1;
+    return 5;
 }
 
 // Return true if something is hit, returns false otherwise. Only find hits if they are closer than t stored
@@ -325,8 +307,8 @@ int BoundingVolumeHierarchy::numLevels() const
 // file you like, including bounding_volume_hierarchy.h .
 bool BoundingVolumeHierarchy::intersect(Ray& ray, HitInfo& hitInfo) const
 {
-
     bool hit = false;
+
     if(maxLevel != 0) {
         float origT;
         std::stack<Node> s;
@@ -354,6 +336,7 @@ bool BoundingVolumeHierarchy::intersect(Ray& ray, HitInfo& hitInfo) const
                         }
                     }
                 }
+
             }
         }
     } else {
@@ -369,10 +352,8 @@ bool BoundingVolumeHierarchy::intersect(Ray& ray, HitInfo& hitInfo) const
             }
         }
     }
-
     // Intersect with spheres.
     for (const auto& sphere : m_pScene->spheres)
         hit |= intersectRayWithShape(sphere, ray, hitInfo);
     return hit;
 }
-
