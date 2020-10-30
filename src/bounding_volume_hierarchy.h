@@ -14,7 +14,6 @@ struct Tri {
 
 class BoundingVolumeHierarchy {
 
-    std::vector<Node> nodes;
 public:
     BoundingVolumeHierarchy(Scene* pScene);
 
@@ -38,6 +37,7 @@ public:
     bool intersect(Ray& ray, HitInfo& hitInfo) const;
 
 private:
+    std::vector<Node> nodes;
     Scene* m_pScene;
 };
 
