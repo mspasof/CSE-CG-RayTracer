@@ -1,8 +1,8 @@
 #include "bounding_volume_hierarchy.h"
 #include "draw.h"
-#include "math.h"
-#include <bits/stdc++.h> 
+#include "math.h" 
 #include <iostream>
+#include <stack>
 
 const int maxLevel = 8;
 const int bins = 8;
@@ -10,29 +10,29 @@ const int bins = 8;
 BoundingVolumeHierarchy::BoundingVolumeHierarchy(Scene* pScene)
     : m_pScene(pScene)
 {
-    std::vector<Tri> triangles;
     for(const auto& mesh : pScene->meshes) {
         for (const auto& tri : mesh.triangles) {
             Tri triangleToPush;
             triangleToPush.a = mesh.vertices[tri[0]].p;
             triangleToPush.b = mesh.vertices[tri[1]].p;
             triangleToPush.c = mesh.vertices[tri[2]].p;
+            triangleToPush.material = mesh.material;
             triangles.push_back(triangleToPush);
         }
     }
-    nodes.push_back(constructParent(pScene, triangles));
-    buildTree(1, triangles);
+    nodes.push_back(constructParent(pScene));
+    buildTree(1);
 }
 
-void BoundingVolumeHierarchy::buildTree(int currentLevel, std::vector<Tri>& triangles) {
+void BoundingVolumeHierarchy::buildTree(int currentLevel) {
     if(currentLevel == (maxLevel + 1)) return;
     for(int i = int((pow(2, (currentLevel-1)) - 1)); i < int((pow(2, currentLevel) - 1)); i++) {
-        splitByBinning(triangles, currentLevel, i);
+        splitByBinning(currentLevel, i);
     }
-   buildTree(++currentLevel, triangles);
+   buildTree(++currentLevel);
 }
 
-void BoundingVolumeHierarchy::splitByBinning(std::vector<Tri>& triangles, int currentLevel, int index) { 
+void BoundingVolumeHierarchy::splitByBinning(int currentLevel, int index) { 
     Node nodeToSplit = BoundingVolumeHierarchy::nodes.at(index);
     float bestSplit = 1.0f;
     AxisAlignedBox first;
@@ -45,20 +45,20 @@ void BoundingVolumeHierarchy::splitByBinning(std::vector<Tri>& triangles, int cu
 
         second.lower = glm::vec3((frac * (aabb.upper.x - aabb.lower.x) + aabb.lower.x), aabb.lower.y, aabb.lower.z);
         second.upper = aabb.upper; 
-        bestSplit = std::min(bestSplit, eval(first, second, nodeToSplit, triangles));
+        bestSplit = std::min(bestSplit, eval(first, second, nodeToSplit));
         first.lower = aabb.lower;
         first.upper =  glm::vec3(aabb.upper.x, (frac * (aabb.upper.y - aabb.lower.y) + aabb.lower.y), aabb.upper.z);
 
         second.lower = glm::vec3(aabb.lower.x, (frac * (aabb.upper.y - aabb.lower.y) + aabb.lower.y) , aabb.lower.z);
         second.upper = aabb.upper; 
-        bestSplit = std::min(bestSplit, eval(first, second, nodeToSplit, triangles));
+        bestSplit = std::min(bestSplit, eval(first, second, nodeToSplit));
 
         first.lower = aabb.lower;
         first.upper =  glm::vec3(aabb.upper.x, aabb.upper.y, (frac * (aabb.upper.z - aabb.lower.z) + aabb.lower.z));
 
         second.lower = glm::vec3(aabb.lower.x, aabb.lower.y, (frac * (aabb.upper.z - aabb.lower.z) + aabb.lower.z));
         second.upper = aabb.upper; 
-        bestSplit = std::min(bestSplit, eval(first, second, nodeToSplit, triangles));
+        bestSplit = std::min(bestSplit, eval(first, second, nodeToSplit));
     }    
     if(bestSplit < 1.0f) {
         for(int i = 1; i < bins; i++) {
@@ -69,8 +69,8 @@ void BoundingVolumeHierarchy::splitByBinning(std::vector<Tri>& triangles, int cu
             second.lower = glm::vec3((frac * (aabb.upper.x - aabb.lower.x) + aabb.lower.x), aabb.lower.y, aabb.lower.z);
             second.upper = aabb.upper; 
 
-            if(eval(first, second, nodeToSplit, triangles) == bestSplit) {
-                appendChildren(first, second, triangles, currentLevel, index);   
+            if(eval(first, second, nodeToSplit) == bestSplit) {
+                appendChildren(first, second, currentLevel, index);   
                 break;
             }
 
@@ -80,8 +80,8 @@ void BoundingVolumeHierarchy::splitByBinning(std::vector<Tri>& triangles, int cu
             second.lower = glm::vec3(aabb.lower.x, (frac * (aabb.upper.y - aabb.lower.y) + aabb.lower.y) , aabb.lower.z);
             second.upper = aabb.upper; 
         
-            if(eval(first, second, nodeToSplit, triangles) == bestSplit) {
-                appendChildren(first, second, triangles, currentLevel, index);   
+            if(eval(first, second, nodeToSplit) == bestSplit) {
+                appendChildren(first, second, currentLevel, index);   
                 break;
             }
 
@@ -91,8 +91,8 @@ void BoundingVolumeHierarchy::splitByBinning(std::vector<Tri>& triangles, int cu
             second.lower = glm::vec3(aabb.lower.x, aabb.lower.y, (frac * (aabb.upper.z - aabb.lower.z) + aabb.lower.z));
             second.upper = aabb.upper;  
 
-            if(eval(first, second, nodeToSplit, triangles) == bestSplit) {
-                appendChildren(first, second, triangles, currentLevel, index);   
+            if(eval(first, second, nodeToSplit) == bestSplit) {
+                appendChildren(first, second, currentLevel, index);   
                 break;
             }
         }
@@ -107,7 +107,7 @@ void BoundingVolumeHierarchy::splitByBinning(std::vector<Tri>& triangles, int cu
     }
 }
 
-void BoundingVolumeHierarchy::appendChildren(AxisAlignedBox& first, AxisAlignedBox& second, std::vector<Tri>& triangles, int currentLevel, int index) {
+void BoundingVolumeHierarchy::appendChildren(AxisAlignedBox& first, AxisAlignedBox& second, int currentLevel, int index) {
     Node nodeToSplit = BoundingVolumeHierarchy::nodes.at(index);
     Node leftChild = Node();
     leftChild.boundingbox = first;
@@ -133,8 +133,8 @@ void BoundingVolumeHierarchy::appendChildren(AxisAlignedBox& first, AxisAlignedB
     for(int i = 0; i < childToSplit.size(); i++) {
         leftChild.indeces.push_back(childToSplit.at(i));
     }
-    AxisAlignedBox lower = defineAABB(leftChild.indeces, triangles);
-    AxisAlignedBox upper = defineAABB(rightChild.indeces, triangles);
+    AxisAlignedBox lower = defineAABB(leftChild.indeces);
+    AxisAlignedBox upper = defineAABB(rightChild.indeces);
 
     leftChild.boundingbox = lower;
     leftChild.isLeaf = true;
@@ -148,7 +148,7 @@ void BoundingVolumeHierarchy::appendChildren(AxisAlignedBox& first, AxisAlignedB
     nodes.push_back(rightChild);
 }
 
-float BoundingVolumeHierarchy::eval(AxisAlignedBox& first, AxisAlignedBox& second, Node& nodeToSplit, std::vector<Tri>& triangles) {
+float BoundingVolumeHierarchy::eval(AxisAlignedBox& first, AxisAlignedBox& second, Node& nodeToSplit) {
     float totalArea = (first.upper.x - first.lower.x) * (first.upper.y - first.lower.y) * (first.upper.z - first.lower.z) + (second.upper.x - second.lower.x) * (second.upper.y - second.lower.y) * (second.upper.z - second.lower.z);
     Node leftChild = Node();
     leftChild.boundingbox = first;
@@ -174,13 +174,13 @@ float BoundingVolumeHierarchy::eval(AxisAlignedBox& first, AxisAlignedBox& secon
     for(int i = 0; i < childToSplit.size(); i++) {
         leftChild.indeces.push_back(childToSplit.at(i));
     }
-    AxisAlignedBox lower = defineAABB(leftChild.indeces, triangles);
-    AxisAlignedBox upper = defineAABB(rightChild.indeces, triangles);
+    AxisAlignedBox lower = defineAABB(leftChild.indeces);
+    AxisAlignedBox upper = defineAABB(rightChild.indeces);
     float sumArea = (lower.upper.x - lower.lower.x) * (lower.upper.y - lower.lower.y) * (lower.upper.z - lower.lower.z) + (upper.upper.x - upper.lower.x) * (upper.upper.y - upper.lower.y) * (upper.upper.z - upper.lower.z);
     return sumArea/totalArea;
 }
 
-AxisAlignedBox BoundingVolumeHierarchy::defineAABB(std::vector<int>& ind, std::vector<Tri>& triangles) {
+AxisAlignedBox BoundingVolumeHierarchy::defineAABB(std::vector<int>& ind) {
     AxisAlignedBox res;
     if(ind.empty()) return res;
 
@@ -226,7 +226,7 @@ bool BoundingVolumeHierarchy::isInsideAABB(AxisAlignedBox& aabb, Tri& t) {
     return (cond1 && cond2 && cond3);
 }
 
-Node BoundingVolumeHierarchy::constructParent(Scene* pScene, std::vector<Tri>& triangles) {
+Node BoundingVolumeHierarchy::constructParent(Scene* pScene) {
     Node node;
     node.boundingbox = calculateParentAAB(pScene);
     node.isLeaf = true;
@@ -344,20 +344,9 @@ bool BoundingVolumeHierarchy::intersect(Ray& ray, HitInfo& hitInfo) const
                 s.push(nodes.at(checkValue.indeces.at(1)));
             } else if(intersect && checkValue.isLeaf) {
                 for(int i = 0; i < checkValue.indeces.size(); i++) {
-                    int ind = checkValue.indeces[i];
-                    int k = 0;
-                    while(ind >= 0) {
-                        ind -= m_pScene->meshes.at(k).triangles.size();
-                        k++;
-                    }
-                    k--;
-                    ind += m_pScene->meshes.at(k).triangles.size();
-                    tri = m_pScene->meshes[k].triangles[ind];
-                    triangleToCheck.a = m_pScene->meshes[k].vertices[tri[0]].p;
-                    triangleToCheck.b = m_pScene->meshes[k].vertices[tri[1]].p;
-                    triangleToCheck.c = m_pScene->meshes[k].vertices[tri[2]].p;
+                    triangleToCheck = triangles[checkValue.indeces[i]];
                     if(intersectRayWithTriangle(triangleToCheck.a, triangleToCheck.b, triangleToCheck.c, ray, hitInfo)) {
-                        hitInfo.material = m_pScene->meshes[k].material;
+                        hitInfo.material = triangleToCheck.material;
                         hit = true;
                     }
                 }
