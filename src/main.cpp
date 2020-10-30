@@ -35,6 +35,7 @@ const float EPSILON = 0.00001f;
 const int reflectionDepthLimit = 8;
 int maxReflectionDepth = reflectionDepthLimit;
 bool debugHardShadows = false;
+bool debugSoftShadows = false;
 bool debugNormals = false;
 bool debugReflections = false;
 bool debugTransmissions = false;
@@ -175,8 +176,6 @@ static glm::vec3 getFinalColor(const Scene& scene, const BoundingVolumeHierarchy
             drawRay(normal, glm::vec3{0.0f, 0.0f, 1.0f});
         }
 
-        // Set the color of the pixel to white if the ray hits.
-
         color += getDiffuseLighting(scene, bvh, ray, hitInfo) + getSpecularLighting(scene, bvh, ray, hitInfo);
         clampLight(color);
         return color;
@@ -283,7 +282,8 @@ int main(int argc, char** argv)
 
         // Add your visual debug switches in this section
         ImGui::Text("Visual Debuging");
-        ImGui::Checkbox("Draw Direct Light", &debugHardShadows);
+        ImGui::Checkbox("Draw Hard Shadows", &debugHardShadows);
+        ImGui::Checkbox("Draw Soft Shadows", &debugSoftShadows);
         ImGui::Checkbox("Draw Normals", &debugNormals);
         ImGui::Checkbox("Draw Reflections", &debugReflections);
         ImGui::Checkbox("Draw Transmissions", &debugTransmissions);
@@ -497,39 +497,31 @@ static void renderOpenGL(const Scene& scene, const Trackball& camera, int select
 }
 
 static glm::vec3 getDiffuseLighting(const Scene& scene, const BoundingVolumeHierarchy& bvh, Ray ray, HitInfo hitInfo) {
-    const glm::vec3 Kd = hitInfo.material.kd;
-
     glm::vec3 normal = hitInfo.normal;
     if (glm::dot(glm::normalize(hitInfo.normal), glm::normalize(ray.direction)) > 0)
         normal = -hitInfo.normal;
     
-    const glm::vec3 pointPos = ray.origin + ray.t * ray.direction;
+    const glm::vec3 point = ray.origin + ray.t * ray.direction;
 
     glm::vec3 totalVector = glm::vec3(0.0f);
 
     for (PointLight light : scene.pointLights) {
         if(!isVisibleByPointLight(scene, ray, light)) continue;
-        glm::vec3 lightPos = light.position;
-        glm::vec3 pointToLight = lightPos - pointPos;
-
-        float coefficient = glm::dot(glm::normalize(normal), glm::normalize(pointToLight));
-
-        if (coefficient < 0.0f)
-            coefficient = 0.0f;
-
-        float distance2 = glm::dot(pointToLight, pointToLight);
-        glm::vec3 lightcolor = light.color;
-
-        coefficient = coefficient / distance2;
-        glm::vec3 individualVector = Kd * lightcolor * coefficient;
-
-        totalVector += individualVector;
+        glm::vec3 pointToLight = light.position - point;
+        totalVector += hitInfo.material.kd * light.color * std::max(0.0f, glm::dot(normal, pointToLight)) / glm::dot(pointToLight, pointToLight);
     }
 
-
     for(const auto& sphericalLight : scene.sphericalLight) {
-        glm::vec3 toLight = sphericalLight.position - pointPos;
-        totalVector+= hitInfo.material.kd * sphericalLight.color * percentageIllumination(scene, bvh, ray, hitInfo, sphericalLight) * glm::dot(hitInfo.normal, toLight) / glm::dot(toLight, toLight);
+        glm::vec3 lightDir = sphericalLight.position - point;
+        float coefficient = percentageIllumination(scene, bvh, ray, hitInfo, sphericalLight) * glm::dot(hitInfo.normal, lightDir) / glm::dot(lightDir, lightDir);
+        totalVector+= hitInfo.material.kd * sphericalLight.color * coefficient;
+        if(debugSoftShadows){
+            Ray toLight;
+            toLight.origin = point;
+            toLight.direction = lightDir;
+            toLight.t = 1;
+            drawRay(toLight, glm::vec3(coefficient));
+        }
     }
 
     return totalVector;
