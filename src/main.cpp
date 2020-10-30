@@ -508,12 +508,12 @@ static glm::vec3 getDiffuseLighting(const Scene& scene, const BoundingVolumeHier
     for (PointLight light : scene.pointLights) {
         if(!isVisibleByPointLight(scene, ray, light)) continue;
         glm::vec3 pointToLight = light.position - point;
-        totalVector += hitInfo.material.kd * light.color * std::max(0.0f, glm::dot(normal, pointToLight)) / glm::dot(pointToLight, pointToLight);
+        totalVector += hitInfo.material.kd * light.color * std::max(0.0f, glm::dot(glm::normalize(normal), glm::normalize(pointToLight))) / glm::dot(pointToLight, pointToLight);
     }
 
     for(const auto& sphericalLight : scene.sphericalLight) {
         glm::vec3 lightDir = sphericalLight.position - point;
-        float coefficient = percentageIllumination(scene, bvh, ray, hitInfo, sphericalLight) * glm::dot(hitInfo.normal, lightDir) / glm::dot(lightDir, lightDir);
+        float coefficient = percentageIllumination(scene, bvh, ray, hitInfo, sphericalLight) * glm::dot(glm::normalize(normal), glm::normalize(lightDir)) / glm::dot(lightDir, lightDir);
         totalVector+= hitInfo.material.kd * sphericalLight.color * coefficient;
         if(debugSoftShadows){
             Ray toLight;
@@ -535,7 +535,7 @@ static glm::vec3 getSpecularLighting(const Scene& scene, const BoundingVolumeHie
 
     for (PointLight light : scene.pointLights) {
         if(isVisibleByPointLight(scene, ray, light)){
-            float coefficient = glm::pow(std::max(0.0f, glm::dot(glm::reflect(point - light.position, hitInfo.normal), -ray.direction)), hitInfo.material.shininess);
+            float coefficient = glm::pow(std::max(0.0f, glm::dot(glm::normalize(glm::reflect(point - light.position, hitInfo.normal)), glm::normalize(-ray.direction))), hitInfo.material.shininess);
             totalVector += hitInfo.material.ks * light.color * coefficient;
             if(debugSpecular){
                 Ray toLight;
@@ -544,6 +544,18 @@ static glm::vec3 getSpecularLighting(const Scene& scene, const BoundingVolumeHie
                 toLight.t = 1;
                 drawRay(toLight, glm::vec3(coefficient));
             }
+        }
+    }
+    
+    for (SphericalLight sphericalLight : scene.sphericalLight){
+        float coefficient = percentageIllumination(scene, bvh, ray, hitInfo, sphericalLight) * glm::pow(std::max(0.0f, glm::dot(glm::normalize(glm::reflect(point - sphericalLight.position, hitInfo.normal)), glm::normalize(-ray.direction))), hitInfo.material.shininess);
+        totalVector += hitInfo.material.ks * sphericalLight.color * coefficient;
+        if(debugSpecular){
+            Ray toLight;
+            toLight.origin = point;
+            toLight.direction = sphericalLight.position - point;
+            toLight.t = 1;
+            drawRay(toLight, glm::vec3(coefficient));
         }
     }
 
