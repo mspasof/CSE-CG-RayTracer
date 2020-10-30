@@ -21,6 +21,8 @@ BoundingVolumeHierarchy::BoundingVolumeHierarchy(Scene* pScene)
         }
     }
     if(triangles.size() < 100) maxLevel = 0;
+    else if(triangles.size() < 1000) maxLevel = 5;
+    else maxLevel = 8;
     nodes.push_back(constructParent(pScene));
     buildTree(1);
 }
