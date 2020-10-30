@@ -4,7 +4,7 @@
 #include <iostream>
 #include <stack>
 
-const int maxLevel = 8;
+int maxLevel = 8;
 const int bins = 8;
 
 BoundingVolumeHierarchy::BoundingVolumeHierarchy(Scene* pScene)
@@ -17,9 +17,10 @@ BoundingVolumeHierarchy::BoundingVolumeHierarchy(Scene* pScene)
             triangleToPush.b = mesh.vertices[tri[1]].p;
             triangleToPush.c = mesh.vertices[tri[2]].p;
             triangleToPush.material = mesh.material;
-            triangles.push_back(triangleToPush);
+            triangles.push_back(triangleToPush);    
         }
     }
+    if(triangles.size() < 100) maxLevel = 0;
     nodes.push_back(constructParent(pScene));
     buildTree(1);
 }
@@ -324,31 +325,44 @@ bool BoundingVolumeHierarchy::intersect(Ray& ray, HitInfo& hitInfo) const
 {
 
     bool hit = false;
-
-    float origT;
-    std::stack<Node> s;
-    Node checkValue;
-    bool intersect;
-    Triangle tri;
-    Tri triangleToCheck;
-    if(!nodes.empty()) {
-        s.push(nodes[0]);
-        while(!s.empty()) {
-            checkValue = s.top();
-            s.pop();
-            origT = ray.t;
-            intersect = intersectRayWithShape(checkValue.boundingbox, ray);
-            if(intersect) ray.t = origT;
-            if(intersect && !checkValue.isLeaf) {
-                s.push(nodes.at(checkValue.indeces.at(0)));
-                s.push(nodes.at(checkValue.indeces.at(1)));
-            } else if(intersect && checkValue.isLeaf) {
-                for(int i = 0; i < checkValue.indeces.size(); i++) {
-                    triangleToCheck = triangles[checkValue.indeces[i]];
-                    if(intersectRayWithTriangle(triangleToCheck.a, triangleToCheck.b, triangleToCheck.c, ray, hitInfo)) {
-                        hitInfo.material = triangleToCheck.material;
-                        hit = true;
+    if(maxLevel != 0) {
+        float origT;
+        std::stack<Node> s;
+        Node checkValue;
+        bool intersect;
+        Triangle tri;
+        Tri triangleToCheck;
+        if(!nodes.empty()) {
+            s.push(nodes[0]);
+            while(!s.empty()) {
+                checkValue = s.top();
+                s.pop();
+                origT = ray.t;
+                intersect = intersectRayWithShape(checkValue.boundingbox, ray);
+                if(intersect) ray.t = origT;
+                if(intersect && !checkValue.isLeaf) {
+                    s.push(nodes.at(checkValue.indeces.at(0)));
+                    s.push(nodes.at(checkValue.indeces.at(1)));
+                } else if(intersect && checkValue.isLeaf) {
+                    for(int i = 0; i < checkValue.indeces.size(); i++) {
+                        triangleToCheck = triangles[checkValue.indeces[i]];
+                        if(intersectRayWithTriangle(triangleToCheck.a, triangleToCheck.b, triangleToCheck.c, ray, hitInfo)) {
+                            hitInfo.material = triangleToCheck.material;
+                            hit = true;
+                        }
                     }
+                }
+            }
+        }
+    } else {
+        for (const auto& mesh : m_pScene->meshes) {
+            for (const auto& tri : mesh.triangles) {
+                const auto v0 = mesh.vertices[tri[0]];
+                const auto v1 = mesh.vertices[tri[1]];
+                const auto v2 = mesh.vertices[tri[2]];
+                if (intersectRayWithTriangle(v0.p, v1.p, v2.p, ray, hitInfo)) {
+                    hitInfo.material = mesh.material;
+                    hit = true;
                 }
             }
         }
