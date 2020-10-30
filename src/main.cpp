@@ -508,12 +508,12 @@ static glm::vec3 getDiffuseLighting(const Scene& scene, const BoundingVolumeHier
     for (PointLight light : scene.pointLights) {
         if(!isVisibleByPointLight(scene, ray, light)) continue;
         glm::vec3 pointToLight = light.position - point;
-        totalVector += light.color * std::max(0.0f, glm::dot(glm::normalize(normal), glm::normalize(pointToLight))) / glm::dot(pointToLight, pointToLight);
+        totalVector += light.color * std::max(0.0f, glm::dot(glm::normalize(normal), glm::normalize(pointToLight))) / glm::length(pointToLight);
     }
 
     for(const auto& sphericalLight : scene.sphericalLight) {
         glm::vec3 lightDir = sphericalLight.position - point;
-        float coefficient = percentageIllumination(scene, bvh, ray, hitInfo, sphericalLight) * glm::dot(glm::normalize(normal), glm::normalize(lightDir)) / glm::dot(lightDir, lightDir);
+        float coefficient = percentageIllumination(scene, bvh, ray, hitInfo, sphericalLight) * glm::dot(glm::normalize(normal), glm::normalize(lightDir)) / glm::length(lightDir);
         totalVector+= sphericalLight.color * coefficient;
         if(debugSoftShadows){
             Ray toLight;
